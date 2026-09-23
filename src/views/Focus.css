@@ -1,0 +1,347 @@
+/* ==========================================================================
+   春晓 · 专注计时（番茄钟）页样式 —— 只在本页生效
+   独立文件：不改 src/styles.css 的全局设计令牌，只复用变量与既有原子类
+   （.card / .stat-row / .tag / .empty / .settings-msg / .demo-banner）。
+   颜色一律取 :root 里的品牌绿与中性色，亮/暗主题自动跟随。
+   ========================================================================== */
+
+.focus-page {
+  /* 进度环 / 柱状图共用的节奏 */
+  --focus-gap: 16px;
+}
+
+.focus-timer-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--focus-gap);
+}
+
+/* ---------- 阶段切换 ---------- */
+.focus-phase-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.focus-chip {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.focus-chip:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand-text);
+}
+
+.focus-chip.active {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--brand-text);
+  font-weight: 600;
+}
+
+.focus-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.focus-status {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+/* ---------- 大号倒计时 + 进度环 ---------- */
+.focus-ring-row {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+
+.focus-ring-wrap {
+  position: relative;
+  width: 216px;
+  height: 216px;
+  flex: 0 0 auto;
+}
+
+.focus-ring {
+  width: 100%;
+  height: 100%;
+  /* 让 0% 从 12 点方向开始 */
+  transform: rotate(-90deg);
+}
+
+.focus-ring-track,
+.focus-ring-bar {
+  fill: none;
+  stroke-width: 10;
+}
+
+.focus-ring-track {
+  stroke: var(--border);
+}
+
+.focus-ring-bar {
+  stroke: var(--brand);
+  stroke-linecap: round;
+  /* 200ms 的 tick 节奏：进度看起来是连续走，不是一跳一跳 */
+  transition: stroke-dashoffset 0.2s linear;
+}
+
+.focus-ring-bar.is-break {
+  stroke: var(--brand-bright);
+}
+
+.focus-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.focus-clock {
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  /* 时间在变化，选中它没有意义，避免误拖选 */
+  user-select: none;
+}
+
+.focus-clock-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------- 控制按钮 ---------- */
+.focus-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.focus-main-btn {
+  min-width: 156px;
+  padding: 11px 22px;
+  border: none;
+  border-radius: 10px;
+  background: var(--brand-grad);
+  color: var(--brand-grad-on);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.focus-main-btn:hover {
+  filter: brightness(1.06);
+}
+
+.focus-tip {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  max-width: 34em;
+}
+
+/* ---------- 时长调节 ---------- */
+.focus-durations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
+.focus-duration {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.focus-duration-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.focus-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.focus-step-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.focus-step-btn:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand-text);
+  background: var(--brand-soft);
+}
+
+.focus-step-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.focus-duration-value {
+  min-width: 84px;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* ---------- 近 7 天柱状图 ---------- */
+.focus-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 180px;
+  margin: 18px 0 6px;
+  padding: 0 4px 0;
+}
+
+.focus-bar-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+}
+
+.focus-bar-value {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-height: 15px;
+}
+
+.focus-bar-track {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  background: var(--surface-muted);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.focus-bar {
+  width: 100%;
+  background: var(--brand-grad);
+  border-radius: 6px 6px 0 0;
+  transition: height 0.25s ease-out;
+}
+
+.focus-bar-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 最近记录 ---------- */
+.focus-record-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.focus-record-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  font-size: 13px;
+}
+
+.focus-record-kind {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.focus-record-kind.is-break {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.focus-record-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 诚实边界 ---------- */
+.focus-honest-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text-muted);
+}
+
+.focus-honest-list b {
+  color: var(--text);
+}
+
+/* ---------- 窄窗口（悬浮球紧凑模式 / 小屏） ---------- */
+@media (max-width: 720px) {
+  .focus-ring-wrap {
+    width: 180px;
+    height: 180px;
+  }
+
+  .focus-clock {
+    font-size: 38px;
+  }
+
+  .focus-chart {
+    height: 150px;
+  }
+}

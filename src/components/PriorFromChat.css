@@ -1,0 +1,103 @@
+/* ==========================================================================
+   春晓 · 「从本课对话提炼先验知识」卡片样式 —— 只服务本组件
+   独立文件（**不改** src/styles.css 的全局设计令牌）：只复用 :root 的变量与既有原子类
+   （.card / .tag / .tag-warn / .src-badge / .settings-msg / .muted / .primary / .ghost-btn
+     / .prior-raw / .prior-drafts / .prior-draft-* / .prior-gen-actions）。
+
+   这里只放本组件专属的类名：.prior-chat-*
+   ========================================================================== */
+
+.prior-chat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prior-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.prior-chat-head h3 {
+  margin: 0;
+}
+
+.prior-chat-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+
+.prior-chat-note b {
+  color: var(--text);
+}
+
+.prior-chat-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 2px 0 0;
+}
+
+.prior-chat-tip {
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 62ch;
+}
+
+/* 预览模式的诚实提示（不是错误，但必须显眼） */
+.prior-chat-warn {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid #f0d98a;
+  border-radius: var(--radius);
+  background: #fff7e0;
+  color: #8a5d00;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+:root[data-theme="dark"] .prior-chat-warn {
+  background: rgba(217, 165, 32, 0.16);
+  border-color: rgba(240, 217, 138, 0.32);
+  color: #f0d98a;
+}
+
+.prior-chat-warn code {
+  font-size: 12px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+:root[data-theme="dark"] .prior-chat-warn code {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.prior-chat-msg {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+/* 「本次用了 n 条（共 m 条，已截断为最近的 k 条）」的如实说明 */
+.prior-chat-stats {
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.prior-chat-links {
+  margin: 0;
+}
+
+.prior-chat-links a {
+  text-decoration: none;
+}

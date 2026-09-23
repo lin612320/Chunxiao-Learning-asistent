@@ -1,0 +1,45 @@
+{
+  "name": "chunxiao-ball",
+  "version": "1.0.3",
+  "description": "春晓桌宠 · 桌面悬浮球 —— 选中文字即可讲解 / 查课程材料 / 询问 AI",
+  "main": "src/main/main.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "child": "electron . --child",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.chunxiao.ball",
+    "productName": "春晓助手",
+    "npmRebuild": false,
+    "afterPack": "scripts/after-pack.js",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "assets/icon.png",
+      "signAndEditExecutable": false
+    }
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.5"
+  },
+  "allowScripts": {
+    "electron": true,
+    "uiohook-napi@1.5.5": true
+  }
+}

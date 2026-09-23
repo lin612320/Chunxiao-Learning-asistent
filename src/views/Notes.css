@@ -1,0 +1,758 @@
+/* ==========================================================================
+   春晓 · 笔记页样式 —— 只在本页生效
+   独立文件（不改 src/styles.css 的全局设计令牌）：只复用 :root 的变量与既有原子类
+   （.card / .tag / .empty / .muted / .settings-msg / .demo-banner / .primary / .ghost-btn /
+     .danger-btn / .src-badge / .no-print / .hl-mark）。
+
+   这里还负责 `lib/markdown.tsx` 的渲染样式（.md-* 那一族）：T2 渲染器本身只产出结构，
+   不引任何 CSS，所以样式放在**唯一的消费方**本页里，并统一以 `.notes-doc-body` 限定作用域，
+   避免影响将来其它页面复用同一个渲染器。
+   ========================================================================== */
+
+.notes-page {
+  /* 五种批注色（亮色主题） */
+  --notes-yellow: #ffe9a8;
+  --notes-green: #c8ecd4;
+  --notes-blue: #cfe3fb;
+  --notes-pink: #fbd6e3;
+  --notes-purple: #e0d6fb;
+  --notes-ink: #141a17;
+}
+
+:root[data-theme="dark"] .notes-page {
+  /* 暗色主题：改成半透明叠加，避免亮色块把字压得看不见 */
+  --notes-yellow: rgba(255, 214, 102, 0.26);
+  --notes-green: rgba(79, 192, 141, 0.26);
+  --notes-blue: rgba(96, 165, 250, 0.28);
+  --notes-pink: rgba(244, 114, 182, 0.26);
+  --notes-purple: rgba(167, 139, 250, 0.28);
+  --notes-ink: #e7efea;
+}
+
+/* ---------- 表单原子：字段 + 输入 ---------- */
+.notes-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.notes-field > span {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.notes-field select,
+.notes-field input,
+.notes-input {
+  padding: 6px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.notes-field input:focus,
+.notes-field select:focus,
+.notes-input:focus,
+.notes-textarea:focus {
+  outline: 2px solid var(--brand-tint);
+  outline-offset: 1px;
+}
+
+.notes-input {
+  width: 100%;
+}
+
+.notes-textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  resize: vertical;
+}
+
+/* ---------- 生成卡片 ---------- */
+.notes-gen-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 6px 0 2px;
+}
+
+.notes-gen-tip {
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 34em;
+}
+
+.notes-gen-msg {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--brand-text);
+}
+
+.notes-raw {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.notes-raw pre {
+  max-height: 260px;
+  overflow: auto;
+  padding: 9px 11px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notes-draft {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--brand-tint);
+  border-radius: var(--radius);
+  background: var(--brand-soft);
+}
+
+.notes-draft-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.notes-draft .notes-input,
+.notes-draft .notes-textarea {
+  margin-bottom: 8px;
+}
+
+.notes-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ---------- 两栏 ---------- */
+.notes-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .notes-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- 列表 ---------- */
+.notes-list-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notes-item {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.notes-item.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.notes-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.notes-item-main:hover {
+  background: var(--surface);
+}
+
+.notes-item-title {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.notes-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.notes-item > .danger-btn {
+  align-self: center;
+  margin-right: 8px;
+}
+
+.notes-tag-ok {
+  border-color: var(--brand-tint) !important;
+  color: var(--brand-text) !important;
+}
+
+/* ---------- 详情工具条 ---------- */
+.notes-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.notes-export-dir,
+.notes-read-tools {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.notes-export-dir .notes-field,
+.notes-read-tools .notes-field {
+  flex: 1 1 260px;
+}
+
+.notes-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--brand-tint);
+  border-radius: var(--radius);
+  background: var(--brand-soft);
+}
+
+/* ---------- 正文（打印区） ---------- */
+.notes-doc {
+  padding: 4px 2px 2px;
+}
+
+.notes-doc-head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.notes-doc-title {
+  margin: 0 0 8px;
+  font-size: 21px;
+  line-height: 1.4;
+}
+
+.notes-doc-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.notes-ai-warn {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #f0d98a;
+  background: #fff7e0;
+  color: #8a5d00;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+:root[data-theme="dark"] .notes-ai-warn {
+  background: rgba(217, 165, 32, 0.2);
+  border-color: rgba(240, 217, 138, 0.35);
+  color: #f0d98a;
+}
+
+.notes-doc-body {
+  font-size: 14.5px;
+  line-height: 1.85;
+  color: var(--text);
+}
+
+/* ---------- markdown.tsx 的渲染样式（作用域限定在本页正文） ---------- */
+.notes-doc-body .md-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notes-doc-body .md-heading {
+  margin: 6px 0 0;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.notes-doc-body .md-h1 {
+  font-size: 20px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.notes-doc-body .md-h2 {
+  font-size: 17px;
+  color: var(--brand-text);
+}
+
+.notes-doc-body .md-h3 {
+  font-size: 15.5px;
+}
+
+.notes-doc-body .md-h4,
+.notes-doc-body .md-h5,
+.notes-doc-body .md-h6 {
+  font-size: 14.5px;
+}
+
+.notes-doc-body .md-p {
+  margin: 0;
+  word-break: break-word;
+}
+
+.notes-doc-body .md-list-wrap {
+  margin: 0;
+}
+
+.notes-doc-body .md-list {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.notes-doc-body .md-list .md-list {
+  margin: 4px 0 0;
+}
+
+.notes-doc-body .md-list li {
+  margin: 3px 0;
+}
+
+.notes-doc-body .md-inline-code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  font-size: 0.92em;
+}
+
+.notes-doc-body .md-pre {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.notes-doc-body .md-pre code {
+  font-family: inherit;
+  white-space: pre;
+}
+
+.notes-doc-body .md-quote {
+  margin: 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--brand-tint);
+  background: var(--surface-muted);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--text-muted);
+}
+
+.notes-doc-body .md-quote p {
+  margin: 0;
+}
+
+.notes-doc-body .md-hr {
+  margin: 4px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.notes-doc-body .md-table-wrap {
+  overflow-x: auto;
+}
+
+.notes-doc-body .md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13.5px;
+}
+
+.notes-doc-body .md-table th,
+.notes-doc-body .md-table td {
+  border: 1px solid var(--border-strong);
+  padding: 6px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.notes-doc-body .md-table th {
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+
+.notes-doc-body .md-link {
+  color: var(--brand-text);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+/* 批注高亮（由 `<Markdown marks />` 渲染；点击可编辑 / 删除） */
+.notes-doc-body .md-mark {
+  border-radius: 3px;
+  padding: 0 1px;
+  color: var(--notes-ink);
+  cursor: pointer;
+}
+
+.notes-doc-body .md-mark-yellow {
+  background: var(--notes-yellow);
+}
+
+.notes-doc-body .md-mark-green {
+  background: var(--notes-green);
+}
+
+.notes-doc-body .md-mark-blue {
+  background: var(--notes-blue);
+}
+
+.notes-doc-body .md-mark-pink {
+  background: var(--notes-pink);
+}
+
+.notes-doc-body .md-mark-purple {
+  background: var(--notes-purple);
+}
+
+/* ---------- 批注列表 ---------- */
+.notes-anno-block {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.notes-anno-block h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.notes-anno-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notes-anno-item {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.notes-anno-item.is-dead {
+  border-style: dashed;
+}
+
+.notes-anno-dot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+
+.notes-anno-dot.color-yellow,
+.notes-color-btn.color-yellow {
+  background: #f0c419;
+}
+
+.notes-anno-dot.color-green,
+.notes-color-btn.color-green {
+  background: #3aa87e;
+}
+
+.notes-anno-dot.color-blue,
+.notes-color-btn.color-blue {
+  background: #4a90d9;
+}
+
+.notes-anno-dot.color-pink,
+.notes-color-btn.color-pink {
+  background: #e06b95;
+}
+
+.notes-anno-dot.color-purple,
+.notes-color-btn.color-purple {
+  background: #8b6fd6;
+}
+
+.notes-anno-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.notes-anno-quote {
+  font-size: 13.5px;
+  line-height: 1.6;
+  word-break: break-word;
+  padding-left: 8px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text);
+}
+
+.notes-anno-comment {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.notes-anno-dead {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.notes-anno-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.notes-anno-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notes-anno-actions,
+.notes-sel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 颜色选择器 */
+.notes-color-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notes-color-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--border-strong);
+  cursor: pointer;
+  padding: 0;
+}
+
+.notes-color-btn.active {
+  border-color: var(--text);
+}
+
+/* ---------- 选中文字后的「加批注」小面板 ---------- */
+.notes-sel-panel {
+  position: fixed;
+  z-index: 60;
+  width: 350px;
+  max-width: calc(100vw - 20px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--brand-tint);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.notes-sel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.notes-sel-quote {
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 76px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  word-break: break-word;
+}
+
+.notes-sel-warn {
+  font-size: 12px;
+  line-height: 1.65;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #f0d98a;
+  background: #fff7e0;
+  color: #8a5d00;
+}
+
+:root[data-theme="dark"] .notes-sel-warn {
+  background: rgba(217, 165, 32, 0.2);
+  border-color: rgba(240, 217, 138, 0.35);
+  color: #f0d98a;
+}
+
+/* ---------- 打印：只输出正文区（浏览器打印 → 另存为 PDF） ---------- */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  body.notes-printing {
+    background: #fff;
+  }
+
+  body.notes-printing .layout,
+  body.notes-printing .main {
+    display: block !important;
+    height: auto !important;
+    width: auto !important;
+    overflow: visible !important;
+  }
+
+  body.notes-printing .content {
+    overflow: visible !important;
+    height: auto !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  body.notes-printing .no-print {
+    display: none !important;
+  }
+
+  body.notes-printing .notes-split {
+    display: block !important;
+  }
+
+  body.notes-printing .notes-detail-card,
+  body.notes-printing .notes-doc {
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
+  body.notes-printing .notes-doc-head {
+    border-bottom: 1px solid #999;
+  }
+
+  body.notes-printing .notes-doc-title,
+  body.notes-printing .notes-doc-body,
+  body.notes-printing .notes-doc-body * {
+    color: #000 !important;
+  }
+
+  /* 高亮改成"下划虚线"，避免深色底在纸上浪费墨水、也避免文字看不清 */
+  body.notes-printing .notes-doc-body .md-mark {
+    background: transparent !important;
+    border-bottom: 1px dotted #555;
+  }
+
+  body.notes-printing .notes-doc-body .hl-mark {
+    background: transparent !important;
+    font-weight: 700;
+    text-decoration: underline;
+  }
+
+  body.notes-printing .notes-doc-body .md-pre,
+  body.notes-printing .notes-doc-body .md-quote,
+  body.notes-printing .notes-doc-body .md-table th {
+    background: #f4f4f4 !important;
+    border-color: #999 !important;
+  }
+
+  body.notes-printing .notes-doc-body .md-table th,
+  body.notes-printing .notes-doc-body .md-table td {
+    border-color: #999 !important;
+  }
+
+  body.notes-printing .notes-ai-warn {
+    border: 1px solid #999 !important;
+    background: #f4f4f4 !important;
+    color: #000 !important;
+  }
+}

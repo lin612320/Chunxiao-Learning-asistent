@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "春晓",
+  "version": "0.6.0",
+  "identifier": "com.chunxiao.study",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "春晓",
+        "width": 1200,
+        "height": 760,
+        "minWidth": 980,
+        "minHeight": 680,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../floating-ball/dist/win-unpacked": "win-unpacked-0.6.0"
+    }
+  },
+  "plugins": {
+    "note": "悬浮球（Electron 春晓助手）随包分发在版本化目录 win-unpacked-<版本> 内 —— 目录名必须随每次发版递增，否则覆盖安装会报 Error opening file for writing（母本在 0.3.1/0.3.2/0.7.1 连续踩过）。另注：本文件的 bundle 段对未知字段是 deny_unknown_fields，写自定义备注键会直接让构建失败，故备注一律放本 plugins 段。"
+  }
+}

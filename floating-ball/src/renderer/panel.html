@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+<title>AI 小窗</title>
+<style>
+  :root {
+    --bg: linear-gradient(160deg,#161b22,#0d1117);
+    --surface: rgba(255,255,255,0.05);
+    --border: rgba(255,255,255,0.12);
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --input-bg: rgba(255,255,255,0.04);
+    --code-bg: rgba(0,0,0,0.35);
+    --code-text: #e6edf3;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; overflow:hidden; background:transparent; }
+  body {
+    font-family: 'Segoe UI','Microsoft YaHei',sans-serif;
+    color: var(--text); font-size:14px; line-height:1.5;
+    background: var(--bg);
+    border-radius: 14px; border:1px solid var(--border);
+    -webkit-app-region: no-drag;
+  }
+  .app { display:flex; flex-direction:column; height:100%; }
+
+  /* 顶栏 */
+  .top {
+    height:42px; flex:0 0 auto;
+    display:flex; align-items:center; gap:4px; padding:0 8px;
+    border-bottom:1px solid var(--border); background:var(--surface);
+    cursor: grab;
+  }
+  .top.dragging { cursor: grabbing; }
+  .brand { font-weight:700; letter-spacing:1px; margin-right:auto; color:var(--accent); font-size:13px; }
+  .iconbtn {
+    width:28px; height:28px; border-radius:8px; border:1px solid transparent;
+    background:transparent; color:var(--text); cursor:pointer; font-size:14px;
+    display:flex; align-items:center; justify-content:center;
+    transition: background .15s, border-color .15s;
+  }
+  .iconbtn:hover { background:var(--surface); border-color:var(--border); }
+
+  /* 内容 */
+  .body { flex:1 1 auto; display:flex; flex-direction:column; padding:10px; gap:8px; overflow:auto; }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  .label { font-size:12px; color:var(--muted); }
+  textarea, input, select {
+    width:100%; background:var(--input-bg); color:var(--text);
+    border:1px solid var(--border); border-radius:10px;
+    padding:9px 10px; font-size:13px; outline:none; font-family:inherit;
+    resize:vertical;
+  }
+  textarea { min-height:60px; max-height:140px; }
+  textarea:focus, input:focus, select:focus { border-color:var(--accent); }
+
+  .actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .btn {
+    flex:1; min-width:0; padding:9px 10px; border-radius:10px; cursor:pointer;
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    font-size:13px; transition: all .15s; white-space:nowrap;
+  }
+  .btn:hover { border-color:var(--accent); }
+  .btn.primary { background:var(--accent); color:#0b1418; font-weight:700; border-color:transparent; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .btn.relate { opacity:.7; }
+  .btn.relate::after { content:' 📚'; font-size:11px; }
+  .lang-sel { width:auto; flex:0 0 auto; min-width:70px; padding:9px 6px; }
+
+  .result-wrap { flex:1; min-height:100px; display:flex; flex-direction:column; gap:6px; }
+  .result-head { display:flex; align-items:center; gap:6px; }
+  .result-head .title { font-size:12px; color:var(--muted); }
+  .result-head .spacer { margin-left:auto; }
+  .result {
+    flex:1; overflow:auto; padding:10px 12px; border-radius:10px;
+    background:var(--input-bg); border:1px solid var(--border);
+    font-size:13px; line-height:1.6;
+  }
+  .result:empty::before { content:'结果将显示在此…'; color:var(--muted); }
+  .result h1,.result h2,.result h3 { margin:8px 0 4px; line-height:1.3; }
+  .result h1{font-size:18px}.result h2{font-size:16px}.result h3{font-size:14px}
+  .result p { margin:6px 0; }
+  .result ul,.result ol { margin:6px 0 6px 22px; }
+  .result code { background:var(--code-bg); color:var(--code-text); padding:1px 5px; border-radius:5px; font-size:12px; }
+  .result pre { background:var(--code-bg); padding:10px; border-radius:8px; overflow:auto; margin:6px 0; }
+  .result pre code { background:none; padding:0; }
+  .result strong { color:var(--accent); }
+  .cursor { display:inline-block; width:7px; height:14px; background:var(--accent); margin-left:2px; vertical-align:middle; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .status { font-size:11px; color:var(--muted); }
+
+  .drawer {
+    display:none; flex-direction:column; gap:8px;
+    padding:10px; border-top:1px solid var(--border); background:var(--surface);
+  }
+  .drawer.open { display:flex; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row label { width:74px; font-size:12px; color:var(--muted); flex:0 0 74px; }
+  .hotkey-box {
+    display:flex; align-items:center; gap:6px;
+    background:var(--input-bg); border:1px solid var(--border);
+    border-radius:10px; padding:6px 10px; flex:1;
+    min-height:36px;
+  }
+  .hotkey-box.recording { border-color:var(--accent); background:rgba(88,166,255,0.08); }
+  .hotkey-text { font-size:13px; color:var(--text); flex:1; }
+  .hotkey-btn {
+    padding:4px 10px; border-radius:6px; border:1px solid var(--border);
+    background:transparent; color:var(--muted); cursor:pointer; font-size:12px;
+  }
+  .hotkey-btn:hover { color:var(--accent); border-color:var(--accent); }
+
+  /* 抓取模式切换（分段控件，选中态强对比） */
+  .grab-box { display:flex; gap:8px; }
+  .grab-opt {
+    flex:1; position:relative;
+    display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:10px 0; border-radius:10px; font-size:13px; cursor:pointer;
+    border:1.5px solid var(--border); background:var(--input-bg); color:var(--muted);
+    font-weight:500; transition: all .18s ease;
+  }
+  .grab-opt .grab-ico { font-size:15px; filter: grayscale(1) opacity(.7); transition: all .18s; }
+  .grab-opt:hover { border-color:var(--accent); color:var(--text); }
+  /* 选中：实心渐变 + 发光 + 白字 + 图标高亮 + 右上角对勾 */
+  .grab-opt.active {
+    color:#fff; font-weight:700;
+    background: linear-gradient(135deg, var(--accent), #7c5cff);
+    border-color: var(--accent);
+    box-shadow: 0 4px 14px rgba(88,166,255,.45), inset 0 0 0 1px rgba(255,255,255,.15);
+  }
+  .grab-opt.active .grab-ico { filter:none; transform: scale(1.1); }
+  .grab-opt.active::after {
+    content: '✓'; position:absolute; top:-7px; right:-6px;
+    width:18px; height:18px; line-height:18px; text-align:center;
+    background:#3fb950; color:#fff; font-size:11px; font-weight:700;
+    border-radius:50%; box-shadow:0 1px 4px rgba(0,0,0,.4);
+  }
+  .grab-hint { font-size:11px; color:var(--muted); line-height:1.5; min-height:16px; }
+
+  /* 主面板快捷抓取切换 */
+  .grab-quick { display:flex; align-items:center; padding:0 2px; }
+  .grab-q {
+    flex:0 0 auto; padding:7px 12px; border-radius:10px; cursor:pointer;
+    border:1.5px solid var(--border); background:var(--input-bg); color:var(--muted);
+    font-size:12.5px; font-weight:500; transition:all .15s; white-space:nowrap;
+  }
+  .grab-q:hover { color:var(--text); border-color:var(--accent); }
+  .grab-q.active {
+    color:#fff; font-weight:700;
+    background:linear-gradient(135deg, var(--accent), #7c5cff);
+    border-color:var(--accent);
+  }
+
+  /* 文本拖入面板提示 */
+  body.drop-active::after {
+    content: '松开以放入文本';
+    position: fixed; inset: 8px; z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px dashed var(--accent); border-radius: 12px;
+    background: rgba(88,166,255,.12); color: var(--accent);
+    font-size: 15px; font-weight: 600; pointer-events: none;
+  }
+
+  .modal-mask {
+    position:fixed; inset:0; background:rgba(0,0,0,.5);
+    display:none; align-items:center; justify-content:center;
+    z-index:10;
+  }
+  .modal-mask.show { display:flex; }
+  .modal {
+    width:340px; padding:16px; border-radius:12px;
+    background:var(--bg); border:1px solid var(--border);
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .modal-title { font-weight:700; color:var(--text); }
+  .modal-body textarea { min-height:80px; }
+  .modal-actions { display:flex; gap:8px; justify-content:flex-end; }
+  .modal-actions .btn { flex:0 0 auto; min-width:72px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top" id="top">
+    <span class="brand">AI 助手</span>
+    <button class="iconbtn" id="btnApp" title="推送到春晓">📋</button>
+    <button class="iconbtn" id="btnSkinPicker" title="换球皮肤">◐</button>
+    <button class="iconbtn" id="btnTheme" title="明/暗主题">🌙</button>
+    <button class="iconbtn" id="btnSettings" title="设置">⚙</button>
+    <button class="iconbtn" id="btnClose" title="隐藏">✕</button>
+  </div>
+
+  <div class="body">
+    <div class="field">
+      <div class="label">文本 / 问题</div>
+      <textarea id="source" placeholder="选中文字自动填入，也可手动输入…"></textarea>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="btnTranslate">翻译</button>
+      <select id="lang" class="lang-sel">
+        <option value="中文">中</option><option value="英文">英</option>
+        <option value="日文">日</option><option value="韩文">韩</option>
+        <option value="法文">法</option><option value="德文">德</option>
+      </select>
+      <button class="btn relate" id="btnRelate" title="在你导入的课程材料中查找（材料检索 M2 开放）">材料</button>
+      <button class="btn" id="btnAsk">询问</button>
+    </div>
+
+    <!-- 抓取模式快捷切换（与「设置」抽屉同步）：自动抓取 / 手动拖入 -->
+    <div class="row grab-quick" style="gap:6px;">
+      <span style="font-size:12px;color:var(--muted);white-space:nowrap;">抓取</span>
+      <button type="button" class="grab-q" id="qAuto">🔄 自动抓取</button>
+      <button type="button" class="grab-q" id="qManual">✋ 手动拖入</button>
+    </div>
+
+    <div class="result-wrap">
+      <div class="result-head">
+        <span class="title">结果</span>
+        <span class="status" id="status"></span>
+        <span class="spacer"></span>
+        <button class="iconbtn" id="btnStop" title="停止">⏹</button>
+        <button class="iconbtn" id="btnCopy" title="复制">⧉</button>
+        <button class="iconbtn" id="btnClear" title="清空结果">🗑</button>
+      </div>
+      <div class="result" id="result"></div>
+    </div>
+  </div>
+
+  <!-- 设置抽屉 -->
+  <div class="drawer" id="setDrawer">
+    <div class="row"><label>AI 平台</label>
+      <select id="cfgProvider" style="flex:1;">
+        <option value="">自定义</option>
+        <option value="deepseek">DeepSeek 深度求索</option>
+        <option value="openai">OpenAI</option>
+        <option value="dashscope">阿里百炼 (DashScope)</option>
+        <option value="zhipu">智谱 AI</option>
+        <option value="moonshot">Moonshot 月之暗面</option>
+        <option value="qwen">通义千问</option>
+        <option value="glm">GLM-4</option>
+      </select>
+    </div>
+    <div class="row"><label>API 地址</label><input type="text" id="cfgBase" placeholder="https://api.deepseek.com/v1" /></div>
+    <div class="row"><label>API Key</label><input type="password" id="cfgKey" placeholder="sk-..." autocomplete="off" /></div>
+    <div class="row"><label>模型</label><input type="text" id="cfgModel" placeholder="deepseek-chat" /></div>
+    <div class="row"><label>快捷键</label>
+      <div class="hotkey-box" id="hotkeyBox">
+        <span class="hotkey-text" id="hotkeyText">Alt+Q</span>
+        <button class="hotkey-btn" id="hotkeyRecord">录制</button>
+        <button class="hotkey-btn" id="hotkeyReset">重置</button>
+      </div>
+    </div>
+    <div class="row" style="flex-direction:column; align-items:stretch; gap:6px;">
+      <label>抓取模式</label>
+      <div class="grab-box" id="grabBox">
+        <button type="button" class="grab-opt" id="grabAuto"><span class="grab-ico">🔄</span><span class="grab-name">自动抓取</span></button>
+        <button type="button" class="grab-opt" id="grabManual"><span class="grab-ico">✋</span><span class="grab-name">手动拖入</span></button>
+      </div>
+      <div class="grab-hint" id="grabHint"></div>
+    </div>
+    <div class="row" style="justify-content:flex-end; gap:6px;">
+      <button class="btn" id="btnTest" style="flex:0 0 auto; width:90px;">测试 Key</button>
+      <button class="btn primary" id="btnSave" style="flex:0 0 auto; width:110px;">保存</button>
+    </div>
+  </div>
+
+  <!-- 询问对话框 -->
+  <div class="modal-mask" id="askModal">
+    <div class="modal">
+      <div class="modal-title">输入你的问题</div>
+      <div class="modal-body">
+        <div id="askContextBar" style="display:none; font-size:11px; color:var(--muted); background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-bottom:8px; max-height:80px; overflow:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span style="color:var(--accent);">📍 关联模式：以下选中文字将作为上下文</span>
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:var(--text); font-size:11px; white-space:nowrap;">
+              <input type="checkbox" id="askUseContext" checked style="cursor:pointer;" /> 启用关联
+            </label>
+          </div>
+          <div id="askContextText"></div>
+        </div>
+        <textarea id="askInput" placeholder="想了解什么？"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="askCancel">取消</button>
+        <button class="btn primary" id="askOk">开始询问</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="panel.js"></script>
+</body>
+</html>

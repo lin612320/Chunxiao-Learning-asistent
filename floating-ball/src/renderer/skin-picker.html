@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+<title>换球皮肤</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:transparent; }
+  body {
+    font-family: 'Segoe UI','Microsoft YaHei',sans-serif;
+    background: linear-gradient(160deg,#1a1f2a,#0d1117);
+    border-radius: 14px; border:1px solid rgba(255,255,255,0.12);
+    color:#e6edf3; font-size:13px;
+    overflow:hidden;
+    -webkit-app-region: no-drag;
+  }
+  .app { display:flex; flex-direction:column; height:100%; }
+
+  .top {
+    height:42px; flex:0 0 auto;
+    display:flex; align-items:center; gap:8px; padding:0 12px;
+    border-bottom:1px solid rgba(255,255,255,0.1);
+    background:rgba(255,255,255,0.03);
+    cursor: grab;
+  }
+  .top.dragging { cursor: grabbing; }
+  .title { font-weight:700; margin-right:auto; }
+  .close-btn {
+    width:28px; height:28px; border-radius:8px; border:1px solid transparent;
+    background:transparent; color:#e6edf3; cursor:pointer; font-size:14px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .close-btn:hover { background:rgba(255,255,255,0.08); }
+
+  .body { flex:1; padding:16px; overflow:auto; }
+  .skin-grid {
+    display:grid; grid-template-columns:repeat(2, 1fr); gap:14px;
+  }
+  .skin-card {
+    border-radius:14px; padding:14px; cursor:pointer;
+    background:rgba(255,255,255,0.04);
+    border:2px solid transparent;
+    transition: transform .15s, border-color .15s, background .15s;
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+  }
+  .skin-card:hover { transform: translateY(-2px); background:rgba(255,255,255,0.08); }
+  .skin-card.active { border-color:#58a6ff; background:rgba(88,166,255,0.1); }
+
+  .ball-preview {
+    width:72px; height:72px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:32px; line-height:1;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    border: 2px solid rgba(255,255,255,0.15);
+    background-size: cover;
+    background-position: center;
+  }
+  .skin-card.active .ball-preview { box-shadow: 0 0 0 3px rgba(88,166,255,0.4), 0 4px 12px rgba(0,0,0,0.3); }
+
+  .skin-name { font-size:12px; color:#e6edf3; font-weight:600; }
+  .skin-tip { font-size:11px; color:#8b949e; }
+
+  .hint { font-size:11px; color:#8b949e; margin-bottom:10px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top" id="top">
+    <span class="title">悬浮球皮肤</span>
+    <button class="close-btn" id="btnClose">✕</button>
+  </div>
+  <div class="body">
+    <div class="hint">点击卡片即可切换，实时生效</div>
+    <div class="skin-grid" id="skinGrid"></div>
+  </div>
+</div>
+<script src="skin-picker.js"></script>
+</body>
+</html>

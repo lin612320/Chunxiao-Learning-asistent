@@ -1,0 +1,37 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-*/
+src-tauri/target/
+src-tauri/gen/
+
+# 悬浮球（子应用）依赖与打包产物
+floating-ball/node_modules/
+floating-ball/dist/
+floating-ball/dist-*/
+
+# 本机数据与备份（绝不入库）
+*.db
+*.db-wal
+*.db-shm
+*.db.user-*
+backups/
+artifacts/
+
+# 编辑器与系统
+.vscode/
+.idea/
+*.log
+Thumbs.db
+desktop.ini
+
+# 环境变量（API Key 等一律不入库）
+.env
+.env.local
+
+# 交付二进制（安装包 / 便携版 / 打包产物 exe）—— 一律不入库：
+#   · 单文件最大 188 MB（`win-unpacked-*\春晓助手.exe`），超过 GitHub 单文件 100 MB 硬上限；
+#   · 安装包改走 GitHub Release 附件分发；
+#   · `发布包/说明.md`（交付清单 + SHA256 + "已验证到哪一步"）**仍然入库**，便于追溯每版发了什么。
+*.exe
+*.msi

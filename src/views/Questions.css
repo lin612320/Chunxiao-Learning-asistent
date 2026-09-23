@@ -1,0 +1,896 @@
+/* ==========================================================================
+   春晓 · 题库页样式（M4 契约 §3.1）—— 只在本页生效
+   --------------------------------------------------------------------------
+   独立文件（与 `Profile.css` 同一做法）：**不往 src/styles.css 里写任何东西**，
+   只复用那里的设计令牌（--brand* / --surface* / --border* / --text* / --danger*）
+   与既有原子类（.card / .page-stack / .section-head / .tag / .chip / .primary /
+   .ghost-btn / .danger-btn / .muted / .empty / .loading-line / .settings-msg /
+   .demo-banner / .tab-bar / .tab / .src-badge / .tag-warn / .tag-danger）。
+   本页自己的类名一律用 `qs-` 前缀，避免污染其它页面。
+   亮 / 暗主题跟随 :root 的令牌，不写死主题色；没有任何图表库（进度/徽标都是
+   DOM + CSS 手写）。
+   ========================================================================== */
+
+.qs-page {
+  /* 本页只加两个内部分档色：样本不足的灰态与"题目有问题"的提示色 */
+  --qs-gray-bg: var(--surface-muted);
+  --qs-flawed: var(--danger);
+}
+
+/* ==========================================================================
+   诚实边界区块（契约 §一：显眼位置，不是脚注）
+   ========================================================================== */
+
+.qs-honest {
+  border: 2px solid var(--brand);
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--brand-soft) 0%, var(--surface) 100%);
+  padding: 16px 20px;
+}
+
+.qs-honest-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--brand-solid);
+  color: var(--brand-on);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.qs-honest-main {
+  margin: 10px 0 6px;
+  font-size: 15.5px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.qs-honest-sub {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.qs-honest-note {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-muted);
+}
+
+.qs-honest-local {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand-text);
+}
+
+.qs-honest code {
+  padding: 1px 6px;
+  border: 1px solid var(--brand-tint);
+  border-radius: 6px;
+  background: var(--surface);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12.5px;
+  color: var(--brand-text);
+}
+
+.qs-msg-hint {
+  margin-left: 6px;
+  opacity: 0.75;
+}
+
+/* ==========================================================================
+   工具条 / 字段
+   ========================================================================== */
+
+.qs-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.qs-toolbar-left,
+.qs-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.qs-toolbar-note {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.qs-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qs-field-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.qs-field select,
+.qs-field input[type="number"] {
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  max-width: 320px;
+}
+
+.qs-field input[type="number"] {
+  width: 76px;
+  max-width: 76px;
+}
+
+.qs-field select:focus,
+.qs-field input:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+
+.qs-field select:disabled,
+.qs-field input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.qs-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.qs-section-note {
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+.qs-foot-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--text-muted);
+}
+
+.qs-note {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid #f0d98a;
+  border-radius: 8px;
+  background: #fff7e0;
+  color: #8a5d00;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+:root[data-theme="dark"] .qs-note {
+  background: rgba(217, 165, 32, 0.16);
+  border-color: rgba(240, 217, 138, 0.32);
+  color: #f0d98a;
+}
+
+.qs-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.qs-check:hover {
+  border-color: var(--brand-tint);
+}
+
+.qs-check.checked {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.qs-check input {
+  accent-color: var(--brand-solid);
+}
+
+/* ==========================================================================
+   知识点列表：掌握度与样本数**必须同时出现**（契约 §一.1 / §一.2）
+   ========================================================================== */
+
+.qs-kp-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.qs-kp-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qs-kp {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--brand);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+/* 样本不足：灰态斜纹（视觉上就不给"结论感"），且不给数字 */
+.qs-kp.thin {
+  border-left-color: var(--border-strong);
+  background: repeating-linear-gradient(
+    45deg,
+    var(--qs-gray-bg) 0,
+    var(--qs-gray-bg) 6px,
+    var(--border) 6px,
+    var(--border) 7px
+  );
+}
+
+.qs-kp.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.qs-kp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.qs-kp-check input {
+  accent-color: var(--brand-solid);
+}
+
+.qs-kp-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.qs-kp-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.qs-mastery {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--brand-tint);
+  color: var(--brand-text);
+  font-weight: 700;
+  cursor: help;
+}
+
+/* evidence：掌握度旁边必须并存的样本数 */
+.qs-evidence {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
+}
+
+.qs-notenough {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-weight: 600;
+  cursor: help;
+}
+
+.qs-kp-actions {
+  margin-left: auto;
+}
+
+/* ==========================================================================
+   生成题目
+   ========================================================================== */
+
+.qs-gen-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.qs-gen-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.qs-gen-kps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1 1 260px;
+}
+
+.qs-gen-tip {
+  font-size: 12px;
+  line-height: 1.7;
+  max-width: 46ch;
+}
+
+.qs-gen-msg {
+  padding: 8px 12px;
+  border: 1px solid var(--brand-tint);
+  border-radius: 8px;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.qs-raw {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.qs-raw summary {
+  cursor: pointer;
+}
+
+.qs-raw pre {
+  margin: 8px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  user-select: text;
+}
+
+.qs-drafts {
+  border: 1px solid var(--brand-tint);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.qs-drafts-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.qs-drafts-tip {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.qs-draft-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 620px;
+  overflow: auto;
+}
+
+.qs-draft-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.qs-draft-item.off {
+  opacity: 0.55;
+}
+
+.qs-draft-item.bad {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.qs-draft-check {
+  flex: 0 0 auto;
+  padding-top: 2px;
+}
+
+.qs-draft-check input {
+  accent-color: var(--brand-solid);
+}
+
+.qs-draft-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.qs-draft-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.qs-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  user-select: text;
+}
+
+.qs-input:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+
+.qs-input:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.qs-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   筛选条与题目列表
+   ========================================================================== */
+
+.qs-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.qs-filter-count {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qs-q-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.qs-q-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+/* 人工校正标记：只做视觉提示，不隐藏、不删除 */
+.qs-q-item.flawed {
+  border-color: var(--danger-border);
+  border-left: 5px solid var(--qs-flawed);
+}
+
+.qs-q-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.qs-q-stem {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+  word-break: break-word;
+  user-select: text;
+}
+
+.qs-q-options {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-muted);
+  user-select: text;
+}
+
+.qs-q-detail {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.qs-q-detail summary {
+  cursor: pointer;
+  color: var(--brand-text);
+}
+
+.qs-q-answer {
+  margin: 6px 0 4px;
+  line-height: 1.8;
+  color: var(--text);
+  user-select: text;
+}
+
+.qs-q-explain {
+  margin: 0;
+  line-height: 1.8;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.qs-q-actions,
+.qs-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qs-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--brand-tint);
+  border-radius: 10px;
+  background: var(--brand-soft);
+}
+
+.qs-edit-tip {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* ==========================================================================
+   练习模式
+   ========================================================================== */
+
+.qs-practice-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.qs-practice-done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--brand-tint);
+  border-radius: 10px;
+  background: var(--brand-soft);
+}
+
+.qs-question {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.qs-question-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.qs-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+.qs-question-stem {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text);
+  word-break: break-word;
+  user-select: text;
+}
+
+.qs-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qs-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.qs-choice:hover {
+  border-color: var(--brand-tint);
+}
+
+.qs-choice.picked {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.qs-choice input {
+  margin-top: 3px;
+  accent-color: var(--brand-solid);
+}
+
+.qs-blank {
+  max-width: 520px;
+}
+
+.qs-question-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.qs-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.75;
+  user-select: text;
+}
+
+.qs-result p {
+  margin: 0;
+}
+
+.qs-result-ok {
+  color: #1e6b3c;
+  font-weight: 600;
+}
+
+.qs-result-bad {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .qs-result-ok {
+  color: #9fe3c2;
+}
+
+.qs-result-note {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.qs-selfeval {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qs-selfeval-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qs-answer-line {
+  color: var(--text);
+}
+
+.qs-record-ok {
+  color: var(--brand-text);
+  font-size: 12.5px;
+}
+
+.qs-record-pending {
+  color: #8a5d00;
+  font-size: 12.5px;
+}
+
+:root[data-theme="dark"] .qs-record-pending {
+  color: #f0d98a;
+}
+
+.qs-record-pending button {
+  margin-left: 8px;
+}
+
+/* ==========================================================================
+   错题本
+   ========================================================================== */
+
+.qs-wrong-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.qs-wrong-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.qs-wrong-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger-border);
+  border-left: 5px solid var(--danger);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.qs-wrong-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.qs-wrong-stem {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text);
+  word-break: break-word;
+  user-select: text;
+}
+
+.qs-wrong-line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--text-muted);
+  user-select: text;
+}
+
+.qs-closing {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ==========================================================================
+   纯 CSS tooltip：把掌握度公式与样本数写进 [data-tip]
+   （同时保留可见的文字说明，键盘 / 读屏也能拿到口径）
+   ========================================================================== */
+
+.qs-tip {
+  position: relative;
+}
+
+.qs-tip[data-tip]:hover::after,
+.qs-tip[data-tip]:focus-within::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  width: max-content;
+  max-width: min(360px, 78vw);
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(20, 26, 23, 0.95);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.65;
+  white-space: pre-line;
+  text-align: left;
+  pointer-events: none;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+}
+
+.qs-tip[data-tip]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .qs-kp {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .qs-kp-actions {
+    margin-left: 0;
+  }
+
+  .qs-draft-list {
+    max-height: none;
+  }
+}
