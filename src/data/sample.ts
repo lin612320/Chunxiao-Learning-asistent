@@ -147,6 +147,13 @@ export interface ChatSession {
   summary?: string | null;
   created_at: string;
   updated_at?: string | null;
+  /**
+   * R5：会话来源 —— `"app"` 主窗口 / `"ball"` 悬浮球。
+   *
+   * 缺省按 `"app"` 处理（与 Rust 侧 `origin TEXT NOT NULL DEFAULT 'app'` 同口径）：
+   * 旧示例数据、旧库里都没有这个字段，**不能**把它当成"第三种来源"。
+   */
+  origin?: "app" | "ball";
 }
 
 export interface ChatMessage {
@@ -477,14 +484,33 @@ function seed(): SampleDB {
         created_at: iso(1),
         updated_at: iso(1),
       },
+      {
+        // R5 示例：**悬浮球**产生的会话（`origin: "ball"`）。
+        // 主窗口默认不列它（分开显示），打开「含悬浮球记录」后才出现并带「球」徽标。
+        id: 33,
+        course_id: 1,
+        title: "悬浮球问答",
+        summary: null,
+        created_at: iso(3),
+        updated_at: iso(3),
+        origin: "ball",
+      },
     ],
     messages: {
       "31": [
         { role: "user", content: "动态数组扩容为什么说插入是 O(1)？", created_at: iso(5) },
         {
           role: "assistant",
+          // R7：这条示例回答**故意写成 Markdown**（标题 + 列表 + 粗体）。
+          //   对话页的气泡现在走 `lib/markdown.tsx` 渲染（旧债 T28），
+          //   `scripts/smoke-ui.mjs` 就在这一页断言「渲染出了真标题与真列表、
+          //   且气泡里不再原样出现 `#` 与 `**`」—— 示例数据是那条断言的数据源。
           content:
-            "因为把扩容那一次 O(n) 的成本摊到了 n 次插入上，均摊结果仍是常数。\n\n不妨先自己想一想：如果每次插入都扩容会发生什么？（这是追问，先别急着看结论）",
+            "## 一句话结论\n\n" +
+            "因为把扩容那一次 O(n) 的成本**摊到**了 n 次插入上，均摊结果仍是常数。\n\n" +
+            "- 单次插入最坏是 O(n)，但那是被 n 次插入一起分摊掉的\n" +
+            "- 均摊分析看的是**一整个序列**的总代价，不是某一次\n\n" +
+            "不妨先自己想一想：如果每次插入都扩容会发生什么？（这是追问，先别急着看结论）",
           created_at: iso(5),
         },
       ],

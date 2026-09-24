@@ -93,6 +93,8 @@ export default function Course() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<number | null>(null);
+  /** R9：一键核对进行中（按钮禁用，避免重复点） */
+  const [verifyingAll, setVerifyingAll] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [report, setReport] = useState<ImportReport | null>(null);
@@ -160,6 +162,45 @@ export default function Course() {
       setError(`标记已核对失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setPendingId(null);
+    }
+  }
+
+  /**
+   * R9：**一键核对** —— 把这门课所有「待核对」标为已核对。
+   *
+   * 用户原话：「核对添加一键核对功能」——原来一门课生成出十几条，就得点十几次「标记已核对」，
+   * 而且每点一次一次 IPC（N 次 IPC 是 T20 记过的教训）。
+   *
+   * ⚠ 两个诚实点：
+   *   ① 这是**用户自己的确认动作**，所以先弹一次确认，并写明"一次会标掉多少条"；
+   *   ② 只改「是否已核对」这一个标记，不动名称 / 说明 / 来源 —— 核对 ≠ 改写内容。
+   */
+  async function handleVerifyAll() {
+    const pending = prior.filter((p) => !p.verified);
+    if (pending.length === 0 || courseId == null) return;
+    const ok = window.confirm(
+      `把《${course?.name ?? "这门课"}》还没核对的 ${pending.length} 条知识点一次标成「已核对」？\n\n` +
+        `只改「是否已核对」这个标记，不会改动它们的名称、说明与来源。`,
+    );
+    if (!ok) return;
+    setVerifyingAll(true);
+    try {
+      let n = 0;
+      if (isTauri()) {
+        n = await invokeStrict<number>("prior_verify_all", { courseId });
+      } else {
+        const db = loadSampleDb();
+        n = db.prior.filter((x) => x.course_id === courseId && !x.verified).length;
+        db.prior = db.prior.map((x) => (x.course_id === courseId ? { ...x, verified: 1 } : x));
+        saveSampleDb(db);
+      }
+      setPrior((prev) => prev.map((x) => ({ ...x, verified: 1 })));
+      setError(null);
+      setNotice(`已把 ${n} 条标为「已核对」。`);
+    } catch (e) {
+      setError(`一键核对失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setVerifyingAll(false);
     }
   }
 
@@ -576,11 +617,24 @@ export default function Course() {
       ) : tab === "prior" ? (
         <>
         <section className="card">
-          <h3>先验知识</h3>
-          <p className="muted hint">
-            每条都标注来源：标「AI 生成 · 待核对」的条目尚未与教材核对，请确认无误后再作为依据；
-            核对后点「标记已核对」。
-          </p>
+          <div className="section-head">
+            <h3 style={{ margin: 0 }}>先验知识</h3>
+            {/* R9：一键核对（只在真有「待核对」条目时出现 —— 没得核对就不摆一个灰按钮） */}
+            {(() => {
+              const pendingCount = prior.filter((p) => !p.verified).length;
+              return pendingCount > 0 ? (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  disabled={verifyingAll || courseId == null}
+                  title="把这门课所有「待核对」条目一次标为已核对"
+                  onClick={() => void handleVerifyAll()}
+                >
+                  {verifyingAll ? "核对中…" : `一键核对（${pendingCount} 条）`}
+                </button>
+              ) : null;
+            })()}
+          </div>
 
           {/* M2：AI 生成知识骨架 —— 只生成到预览，必须用户点「确认入库」才写库 */}
           <div className="prior-gen-bar">
@@ -603,11 +657,11 @@ export default function Course() {
                 </>
               )}
             </button>
-            <span className="muted" style={{ fontSize: 12 }}>
-              {hasKey
-                ? "只会把课程名、简介和材料的文件名、标题发出去（不发送材料全文）；生成的内容也不会自动保存。"
-                : "还没填模型 Key，暂时不能生成（我们不会用模板假造一份冒充 AI 生成的内容）。"}
-            </span>
+            {!hasKey && (
+              <span className="muted" style={{ fontSize: 12 }}>
+                还没填模型 Key，暂时不能生成（我们不会用模板假造一份冒充 AI 生成的内容）。
+              </span>
+            )}
             {!hasKey && (
               <Link to="/settings" className="ghost-btn" style={{ textDecoration: "none" }}>
                 去「数据设置」配置 →
@@ -706,18 +760,12 @@ export default function Course() {
                 <button className="ghost-btn" disabled={committing} onClick={cancelDrafts}>
                   取消
                 </button>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  保存后会标上来源「AI 生成 · 待核对」，需要你逐条核对。
-                </span>
               </div>
             </div>
           )}
 
           {prior.length === 0 ? (
-            <p className="empty">
-              这门课还没有先验知识条目。可以点上面的「AI 生成知识骨架」，让模型按课程名与材料标题先搭一版
-              （生成后需要你逐条确认才会保存）。
-            </p>
+            <p className="empty">这门课还没有知识点。</p>
           ) : (
             <ul className="prior-list">
               {prior.map((p) => {
@@ -740,9 +788,6 @@ export default function Course() {
                         >
                           {pendingId === p.id ? "保存中…" : "标记已核对"}
                         </button>
-                        <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
-                          核对过再当依据用；AI 生成内容可能有误。
-                        </span>
                       </div>
                     )}
                   </li>
@@ -790,11 +835,10 @@ export default function Course() {
             </div>
           </div>
           <p className="muted hint">
-            只导入你有权使用的材料；材料只存在这台电脑上，不会上传。正文是<b>你导入的原文</b>（不是 AI 生成），
-            会分成小段存起来，在「问答」里作为可以点回去的参考来源。
+            只导入你有权使用的材料。材料只存在这台电脑上，不会上传。
             {hasKey
-              ? "PDF / 图片本机读不出正文时会交给能看图的模型转写，转写结果会标明「这是模型转写的，不是原文」。"
-              : "PDF / 图片要先配好能看图的模型才能读到正文；没配好时就只存文件名。"}
+              ? "PDF / 图片读不出正文时会交给能看图的模型转写，并标明「这是模型转写的，不是原文」。"
+              : "PDF / 图片要先配好能看图的模型才能读到正文。"}
           </p>
 
           {!isTauri() && (
@@ -843,9 +887,7 @@ export default function Course() {
           )}
 
           {materials.length === 0 ? (
-            <p className="empty">
-              还没有材料。点右上角「导入材料」选择课件 / 讲义 / 笔记（PDF、Word、PPT、Excel、txt、md、csv、图片）。
-            </p>
+            <p className="empty">还没有材料。</p>
           ) : (
             <ul className="material-list">
               {materials.map((m) => (

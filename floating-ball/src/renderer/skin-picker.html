@@ -5,13 +5,14 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
 <title>换球皮肤</title>
 <style>
+  /* R11：颜色换成「云鲸纸面」深色令牌（暮蓝纸面 #172435 / 文字 #e4edf2 / 月色蓝 #83bcdc）。 */
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body { height:100%; background:transparent; }
   body {
-    font-family: 'Segoe UI','Microsoft YaHei',sans-serif;
-    background: linear-gradient(160deg,#1a1f2a,#0d1117);
-    border-radius: 14px; border:1px solid rgba(255,255,255,0.12);
-    color:#e6edf3; font-size:13px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #172435;
+    border-radius: 16px 19px 15px 18px; border:1px solid rgba(167,199,216,.18);
+    color:#e4edf2; font-size:13px;
     overflow:hidden;
     -webkit-app-region: no-drag;
   }
@@ -20,18 +21,18 @@
   .top {
     height:42px; flex:0 0 auto;
     display:flex; align-items:center; gap:8px; padding:0 12px;
-    border-bottom:1px solid rgba(255,255,255,0.1);
-    background:rgba(255,255,255,0.03);
+    border-bottom:1px solid rgba(167,199,216,.18);
+    background:rgba(28,45,66,.72);
     cursor: grab;
   }
   .top.dragging { cursor: grabbing; }
   .title { font-weight:700; margin-right:auto; }
   .close-btn {
     width:28px; height:28px; border-radius:8px; border:1px solid transparent;
-    background:transparent; color:#e6edf3; cursor:pointer; font-size:14px;
+    background:transparent; color:#e4edf2; cursor:pointer; font-size:14px;
     display:flex; align-items:center; justify-content:center;
   }
-  .close-btn:hover { background:rgba(255,255,255,0.08); }
+  .close-btn:hover { background:rgba(167,199,216,.14); }
 
   .body { flex:1; padding:16px; overflow:auto; }
   .skin-grid {
@@ -39,29 +40,32 @@
   }
   .skin-card {
     border-radius:14px; padding:14px; cursor:pointer;
-    background:rgba(255,255,255,0.04);
+    background:rgba(28,45,66,.86);
     border:2px solid transparent;
     transition: transform .15s, border-color .15s, background .15s;
     display:flex; flex-direction:column; align-items:center; gap:10px;
   }
-  .skin-card:hover { transform: translateY(-2px); background:rgba(255,255,255,0.08); }
-  .skin-card.active { border-color:#58a6ff; background:rgba(88,166,255,0.1); }
+  .skin-card:hover { transform: translateY(-2px); background:rgba(41,66,91,.9); }
+  .skin-card.active { border-color:#83bcdc; background:rgba(131,188,220,.14); }
 
   .ball-preview {
     width:72px; height:72px; border-radius:50%;
     display:flex; align-items:center; justify-content:center;
     font-size:32px; line-height:1;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    border: 2px solid rgba(255,255,255,0.15);
+    border: 2px solid rgba(167,199,216,.22);
     background-size: cover;
     background-position: center;
   }
-  .skin-card.active .ball-preview { box-shadow: 0 0 0 3px rgba(88,166,255,0.4), 0 4px 12px rgba(0,0,0,0.3); }
+  .skin-card.active .ball-preview { box-shadow: 0 0 0 3px rgba(131,188,220,.45), 0 4px 12px rgba(0,0,0,0.3); }
 
-  .skin-name { font-size:12px; color:#e6edf3; font-weight:600; }
-  .skin-tip { font-size:11px; color:#8b949e; }
+  /* R10：鲸鱼娘的预览（几何来自 whale.js，与球窗口同一份） */
+  .whale-preview { width:38px; height:auto; }
 
-  .hint { font-size:11px; color:#8b949e; margin-bottom:10px; }
+  .skin-name { font-size:12px; color:#e4edf2; font-weight:600; }
+  .skin-tip { font-size:11px; color:#b9c8d2; }
+
+  .hint { font-size:11px; color:#8fa4b2; margin-bottom:10px; }
 </style>
 </head>
 <body>
@@ -75,6 +79,7 @@
     <div class="skin-grid" id="skinGrid"></div>
   </div>
 </div>
+<script src="whale.js"></script>
 <script src="skin-picker.js"></script>
 </body>
 </html>

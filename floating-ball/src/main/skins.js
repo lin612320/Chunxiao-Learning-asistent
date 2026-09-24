@@ -9,6 +9,17 @@
 // PANEL_THEMES：仅 white / dark 两套，控制面板配色
 
 const BALL_SKINS = {
+  whale: {
+    // R11：**鲸鱼娘** —— 用「云鲸女仆」形象（云鲸纸面皮肤的 PET_ART），站在品牌蓝球面上。
+    //   形象图随包分发在 `assets/mascot-maid.webp`；`pet.art` 让 ball.js 用 <img> 显示它
+    //   （球面渐变仍在，所以透明底的形象有底色可衬）。
+    name: '鲸鱼娘',
+    ball: { from: '#7fb9d0', to: '#5aa7d8', shape: 'circle', image: null },
+    pet: {
+      art: 'assets/mascot-maid.webp', dragAnim: 'wobble',
+      dialogues: ['选中文字按 Alt+Q，我来帮你查材料~', '点点我，打开 AI 小窗', '这段我先去你的材料里找一找', '累了吗？休息一下吧 🐳']
+    }
+  },
   aurora: {
     name: '极光绿',
     ball: { from: '#43e97b', to: '#38f9d7', shape: 'circle', image: null },
@@ -67,28 +78,34 @@ const BALL_SKINS = {
 
 const PANEL_THEMES = {
   dark: {
+    // R11：换成「云鲸纸面」深色令牌（暮蓝纸面 + 月色蓝强调 + 图上雾色 haze）
     name: '深色',
-    bg: 'linear-gradient(160deg,#161b22,#0d1117)',
-    surface: 'rgba(255,255,255,0.05)',
-    border: 'rgba(255,255,255,0.12)',
-    text: '#e6edf3',
-    muted: '#8b949e',
-    accent: '#58a6ff',
-    inputBg: 'rgba(255,255,255,0.04)',
-    codeBg: 'rgba(0,0,0,0.35)',
-    codeText: '#e6edf3'
+    bg: '#172435',
+    haze: 'rgba(18,31,47,.52)',
+    drawerBg: '#1c2d42',
+    surface: 'rgba(28,45,66,.96)',
+    border: 'rgba(167,199,216,.18)',
+    text: '#e4edf2',
+    muted: '#b9c8d2',
+    accent: '#83bcdc',
+    inputBg: 'rgba(23,36,53,.92)',
+    codeBg: 'rgba(28,45,66,.98)',
+    codeText: '#e4edf2'
   },
   light: {
+    // R11：云鲸纸面浅色令牌（纸白 + 淡天蓝）
     name: '白色',
-    bg: 'linear-gradient(160deg,#ffffff,#f0f2f5)',
-    surface: 'rgba(0,0,0,0.035)',
-    border: 'rgba(0,0,0,0.12)',
-    text: '#1a1a1a',
-    muted: '#6b7280',
-    accent: '#2563eb',
-    inputBg: 'rgba(0,0,0,0.025)',
-    codeBg: 'rgba(0,0,0,0.06)',
-    codeText: '#1a1a1a'
+    bg: '#eef6f8',
+    haze: 'rgba(255,254,249,.60)',
+    drawerBg: '#f7f9f6',
+    surface: 'rgba(247,249,246,.94)',
+    border: 'rgba(72,112,132,.22)',
+    text: '#243746',
+    muted: '#486170',
+    accent: '#5aa7d8',
+    inputBg: 'rgba(255,255,252,.96)',
+    codeBg: 'rgba(239,246,247,.98)',
+    codeText: '#243746'
   }
 };
 
@@ -99,10 +116,14 @@ const SHAPES = {
   capsule: '40% / 45%'
 };
 
-function getBallSkin(id) { return BALL_SKINS[id] || BALL_SKINS.aurora; }
+function getBallSkin(id) { return BALL_SKINS[id] || BALL_SKINS.whale; }
 function listBallSkins() {
   return Object.entries(BALL_SKINS).map(([id, s]) => ({
     id, name: s.name, face: s.pet?.face, image: s.ball?.image,
+    // R10/R11：`whale` = 用鲸鱼标识当形象；`art` = 用一张形象图（云鲸女仆）当形象。
+    //   换肤窗据此画预览，而不是显示一个空的 face。
+    whale: !!(s.pet && s.pet.whale),
+    art: (s.pet && s.pet.art) || null,
     from: s.ball.from, to: s.ball.to
   }));
 }

@@ -1,6 +1,16 @@
 // 悬浮球渲染逻辑（外部脚本，规避 CSP 对内联脚本的限制）
 const ball = document.getElementById('ball');
 const faceEl = document.getElementById('face');
+const whaleEl = document.getElementById('whale');
+const petEl = document.getElementById('pet');
+
+// R10：鲸鱼标识的几何来自 `whale.js`（与换肤窗共用同一份，避免两处漂移）。
+//   路径为空说明 whale.js 没加载成功 —— 那时**退化成 emoji**，而不是留一个空白球。
+if (whaleEl && window.CX_WHALE && window.CX_WHALE.path) {
+  whaleEl.setAttribute('viewBox', window.CX_WHALE.viewBox);
+  const p = whaleEl.querySelector('path');
+  if (p) p.setAttribute('d', window.CX_WHALE.path);
+}
 
 const SHAPES = {
   circle: '50%',
@@ -9,23 +19,40 @@ const SHAPES = {
   capsule: '40% / 45%'
 };
 
-// 应用完整皮肤对象（含 pet），支持渐变和图片两种外观
+// 应用完整皮肤对象（含 pet），支持渐变、图片、鲸鱼三种外观
 function applySkin(skin) {
   if (!skin) return;
   const r = document.documentElement.style;
   r.setProperty('--radius', SHAPES[skin.ball?.shape] || '50%');
   r.setProperty('--anim', skin.pet?.dragAnim || 'wobble');
   if (skin.ball?.image) {
-    // 图片皮肤：隐藏渐变，显示图片
+    // 图片皮肤：隐藏渐变与形象，只看图片
     ball.style.background = `url(${skin.ball.image}) center/cover no-repeat`;
     faceEl.style.display = 'none';
+    if (whaleEl) whaleEl.style.display = 'none';
+    if (petEl) petEl.style.display = 'none';
+    return;
+  }
+  // 渐变皮肤
+  ball.style.background = '';
+  r.setProperty('--from', skin.ball?.from || '#7fb9d0');
+  r.setProperty('--to', skin.ball?.to || '#5aa7d8');
+  // 形象三选一：图片形象（云鲸女仆）> 鲸鱼标识（SVG）> emoji
+  const art = skin.pet?.art;
+  const useArt = !!art;
+  const useWhale = !useArt && !!skin.pet?.whale && !!window.CX_WHALE && !!window.CX_WHALE.path;
+  if (petEl) {
+    petEl.style.display = useArt ? 'block' : 'none';
+    if (useArt && petEl.getAttribute('src') !== art) petEl.setAttribute('src', art);
+  }
+  if (whaleEl) whaleEl.style.display = useWhale ? 'block' : 'none';
+  if (useArt || useWhale) {
+    faceEl.style.display = 'none';
   } else {
-    // 渐变皮肤
-    ball.style.background = '';
-    r.setProperty('--from', skin.ball?.from || '#43e97b');
-    r.setProperty('--to', skin.ball?.to || '#38f9d7');
-    faceEl.style.display = skin.pet?.face ? 'flex' : 'none';
-    if (skin.pet?.face) faceEl.textContent = skin.pet.face;
+    // 兜底：退回 emoji（🐳），不留空白球
+    faceEl.style.display = 'flex';
+    faceEl.textContent = skin.pet?.face || (skin.pet?.whale ? '🐳' : '');
+    if (!faceEl.textContent) faceEl.style.display = 'none';
   }
 }
 
@@ -109,8 +136,8 @@ ball.addEventListener('drop', (e) => {
   if (text.trim() && window.ballApi) window.ballApi.dropText(text.trim());
 });
 
-// 默认外观，收到主进程皮肤前先有一帧可用
+// 默认外观，收到主进程皮肤前先有一帧可用（R11：默认就是鲸鱼娘）
 applySkin({
-  ball: { from: '#43e97b', to: '#38f9d7' },
-  pet: { shape: 'circle', face: '🦊', dragAnim: 'wobble' }
+  ball: { from: '#7fb9d0', to: '#5aa7d8' },
+  pet: { shape: 'circle', art: 'assets/mascot-maid.webp', dragAnim: 'wobble' }
 });

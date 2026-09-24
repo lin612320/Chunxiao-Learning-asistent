@@ -91,6 +91,8 @@ function registerHotkey() {
       const text = await grabSelection();
       windows.showPanel(config);
       windows.sendToPanel('selection:result', text);
+      // R5.2：热键也是"打开面板"的一条路径 —— 同样要把课程列表要一次
+      requestCourses();
     });
   } catch (e) {
     console.error('注册快捷键失败:', e);
@@ -130,7 +132,7 @@ function setupTray() {
   }
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
   const menu = Menu.buildFromTemplate([
-    { label: '显示悬浮球', click: () => windows.showBall(config) },
+    { label: '显示悬浮球', click: () => { windows.showBall(config); requestCourses(); } },
     { label: '隐藏悬浮球', click: () => windows.hideBall() },
     { type: 'separator' },
     { label: '抓取选中文字', click: async () => {
@@ -138,14 +140,15 @@ function setupTray() {
       windows.showBall(config);
       windows.showPanel(config);
       windows.sendToPanel('selection:result', t);
+      requestCourses();
     }},
     { type: 'separator' },
     { label: '退出', click: () => { quitApp(); } }
   ]);
   tray.setToolTip(`春晓助手 ${appVersion}`);
   tray.setContextMenu(menu);
-  // 托盘双击：显示悬浮球
-  tray.on('double-click', () => windows.showBall(config));
+  // 托盘双击：显示悬浮球（同样顺手要一次课程列表）
+  tray.on('double-click', () => { windows.showBall(config); requestCourses(); });
 }
 
 function quitApp() {
@@ -156,9 +159,10 @@ function quitApp() {
 module.exports = { quitApp };
 
 function registerIpc() {
-  // 悬浮球点击：切换面板
+  // 悬浮球点击：切换面板（打开时顺手把课程列表要一次 —— 见 R5.2）
   ipcMain.on('ball:click', () => {
     windows.togglePanel(config);
+    if (windows.isPanelVisible()) requestCourses();
   });
 
   // 拖文字到悬浮球（手动抓取模式的主要入口）
@@ -213,7 +217,10 @@ function registerIpc() {
   });
   ipcMain.on('ball:leave', () => windows.hideBubble());
 
-  // 小窗顶栏拖动：按位移移动窗口（面板尺寸已固定，仅移动并钳制在主屏内，避免拖出后“找不回”）
+  // 小窗顶栏拖动：按位移移动窗口（仅移动并钳制在主屏内，避免拖出后“找不回”）
+  //   R5：面板已经可以缩放了，但**拖顶栏不能被当成缩放** —— 旧版正是这样"越拖越大"的。
+  //   做法：每次拖动前后都复核尺寸，变了就还原成拖动前的值（拖动路径上尺寸必须恒定；
+  //   真正的缩放走窗口边框，不会触发本 IPC）。
   ipcMain.on('panel:move', (_e, { dx, dy }) => {
     const panel = windows.getPanel();
     if (!panel || panel.isDestroyed()) return;
@@ -223,6 +230,8 @@ function registerIpc() {
     const nx = Math.max(wa.x - pw + 80, Math.min(x + dx, wa.x + wa.width - 80));
     const ny = Math.max(wa.y, Math.min(y + dy, wa.y + wa.height - 42));
     panel.setPosition(Math.round(nx), Math.round(ny));
+    const [aw, ah] = panel.getSize();
+    if (aw !== pw || ah !== ph) panel.setSize(pw, ph, false);
   });
 
   // R4：课程上下文缓存（R1 阶段 2）。
@@ -230,27 +239,33 @@ function registerIpc() {
   //   主程序随 show / prefill 下发，球改动后回写，重启后仍以主程序为准。
   const courseCache = { courses: [], courseId: null };
 
-  /**
-   * 写桥接文件（`from-ball.json`）—— 所有「球 → 主程序」的推送都走这里。
-   *
-   * 统一入口的理由：**每一条推送都要带上当前课程**，否则主程序没法把问答/检索
-   * 归到正确的课程（`docs/15` §3.2 冻结形状）。分散写的话迟早漏一处。
-   */
-  function writeBridge(payload) {
-    try {
-      if (!fs.existsSync(BRIDGE_DIR)) fs.mkdirSync(BRIDGE_DIR, { recursive: true });
-      fs.writeFileSync(
-        BRIDGE_FILE,
-        JSON.stringify({ ts: Date.now(), ...payload }, null, 2),
-        'utf8'
-      );
-      // 尝试拉起春晓学习助手（用户可能还没开主程序）
-      spawnAppIfNeeded();
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
+  // R5：「关联知识点」第一步 —— **只查不写**。
+  //   与「材料」按钮同一形状：球只负责发起，检索由主程序在本机执行，结果经 to-ball.json 回传。
+  ipcMain.handle('relate:search', (_e, { text }) => {
+    return writeBridge({
+      text: text || '',
+      action: 'relate_search',
+      course_id: courseCache.courseId
+    });
+  });
+
+  // R5：「关联知识点」第三步 —— 用户确认后**才**提交入库。
+  //   ⚠ 只有用户点了「加入本课知识点」才会走到这里；球的任何自动行为都不许调用它。
+  ipcMain.handle('relate:save', (_e, { courseId, items, sourceRef }) => {
+    if (courseId == null) {
+      return { ok: false, error: '请先在面板上选一门课程：知识点必须归属到某门课。' };
     }
-  }
+    if (!Array.isArray(items) || items.length === 0) {
+      return { ok: false, error: '没有要加入的知识点。' };
+    }
+    return writeBridge({
+      text: '',
+      action: 'relate_save',
+      course_id: Number(courseId),
+      items,
+      source_ref: sourceRef || ''
+    });
+  });
 
   // 获取状态（配置 + 皮肤列表 + 主题列表 + 课程上下文）
   ipcMain.handle('state:get', () => ({
@@ -260,6 +275,9 @@ function registerIpc() {
     courses: courseCache.courses,
     courseId: courseCache.courseId
   }));
+
+  // R5.2：面板主动要课程列表（面板打开时 / 点开下拉时调用）
+  ipcMain.handle('courses:request', () => requestCourses());
 
   // 抓取选中文字
   ipcMain.handle('selection:grab', async () => {
@@ -426,6 +444,46 @@ function registerIpc() {
   });
 }
 
+/**
+ * 写桥接文件（`from-ball.json`）—— 所有「球 → 主程序」的推送都走这里。
+ *
+ * 统一入口的理由：**每一条推送都要带上当前课程**，否则主程序没法把问答/检索
+ * 归到正确的课程（`docs/15` §3.2 冻结形状）。分散写的话迟早漏一处。
+ *
+ * `opts.spawn === false`：**不主动拉起主程序**。给"填一个下拉框"这类小请求用 ——
+ * 为了一个课程列表把整个主程序启动起来，比下拉空着更糟。
+ *
+ * ⚠ 放在**模块级**（不在 `registerIpc` 里）：热键、托盘、点球这三条"打开面板"的路径
+ *   都在 `registerIpc` 之外，而它们**都必须**顺手把课程列表要一次（R5.2）。
+ */
+function writeBridge(payload, opts) {
+  try {
+    if (!fs.existsSync(BRIDGE_DIR)) fs.mkdirSync(BRIDGE_DIR, { recursive: true });
+    fs.writeFileSync(
+      BRIDGE_FILE,
+      JSON.stringify({ ts: Date.now(), ...payload }, null, 2),
+      'utf8'
+    );
+    // 尝试拉起春晓学习助手（用户可能还没开主程序）
+    if (!opts || opts.spawn !== false) spawnAppIfNeeded();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+}
+
+/**
+ * R5.2：**主动向主程序要课程列表**。
+ *
+ * 为什么必须有它：课程列表原先只在主程序**主动 push**（`ball_show` / `ball_prefill`）时才到球里，
+ * 而"点球 / 按热键 / 从托盘打开面板"走的是 `ball:click` → `togglePanel`，**没有任何推送** ——
+ * 于是球面板的课程下拉里一门课都没有（用户实测："选择课程时没有任何课程"）。
+ * 现在改为：**每次打开面板、以及每次点开下拉时，球主动问一次**。
+ */
+function requestCourses() {
+  return writeBridge({ text: '', action: 'get_courses' }, { spawn: false });
+}
+
 // 拉起春晓学习助手：直接运行打包好的 exe（不再 spawn 源码/dev 服务器）
 function resolveAppExe() {
   const candidates = [];
@@ -480,6 +538,13 @@ app.whenReady().then(() => {
   // 命令行参数：--child 表示由其他项目拉起，--dev 打开 DevTools
   // 注意：child 是运行时标志，绝不写入配置文件（历史版本误写会导致钩子被永久禁用）
   const cli = parseArgs(process.argv);
+
+  // R5：面板尺寸变化 → 落盘（用户拖过就记住；这是纯外观偏好，不涉及知识库）
+  windows.setPanelResizeHandler((w, h) => {
+    config.panelWidth = Math.round(w);
+    config.panelHeight = Math.round(h);
+    save(config);
+  });
 
   windows.createBall(config, () => windows.togglePanel(config));
   windows.createBubble();
@@ -546,6 +611,13 @@ app.whenReady().then(() => {
           // 主程序回传的本地材料检索结果
           windows.showPanel(config);
           windows.sendToPanel('material:result', msg);
+        } else if (cmd === 'relate_result' && msg) {
+          // R5：关联检索结果（材料 / 先验知识 / 知识点 三类）
+          windows.showPanel(config);
+          windows.sendToPanel('relate:result', msg);
+        } else if (cmd === 'relate_saved' && msg) {
+          // R5：知识点入库结果（成功给条数，失败给可读原文 —— 都要原样显示给用户）
+          windows.sendToPanel('relate:saved', msg);
         } else if (cmd === 'config') {
           // 仅同步 AI 配置（配置已在上面落盘），无 UI 动作
         }

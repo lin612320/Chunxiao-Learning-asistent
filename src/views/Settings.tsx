@@ -325,7 +325,6 @@ export default function Settings() {
         <div className="section-head">
           <h3>外观</h3>
         </div>
-        <p className="muted hint">主题会随设置在下次启动时恢复。</p>
         <div className="chip-bar">
           <button
             className={"chip" + (s.theme === "light" ? " chip-active" : "")}

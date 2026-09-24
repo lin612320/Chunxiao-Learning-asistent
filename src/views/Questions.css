@@ -740,7 +740,7 @@
 }
 
 :root[data-theme="dark"] .qs-result-ok {
-  color: #9fe3c2;
+  color: var(--dsw-static-green-400);
 }
 
 .qs-result-note {

@@ -389,6 +389,11 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "chat_sessions", "course_id", "INTEGER")?;
     ensure_column(conn, "chat_sessions", "summary", "TEXT")?;
     ensure_column(conn, "chat_sessions", "updated_at", "TEXT")?;
+    // `chat_sessions.origin`（R5）：会话来源 —— `app`（主窗口）/ `ball`（悬浮球）。
+    //   默认 `'app'` 是**必须的诚实口径**：R4 及以前的球问答是被合并进主窗口会话的
+    //   （旧 `ball_append_qa` 复用该课程"最近更新"的会话），**无法追溯来源**，
+    //   所以历史数据一律按 `app` 处理 —— 分离只对新增数据生效，不做事后猜测。
+    ensure_column(conn, "chat_sessions", "origin", "TEXT NOT NULL DEFAULT 'app'")?;
     ensure_column(conn, "chat_messages", "refs", "TEXT")?;
     ensure_column(conn, "chat_messages", "source_kind", "TEXT")?;
     // `chat_messages.images`（R4）：本轮提问携带的图片，JSON 数组、元素是完整 dataURL。
@@ -933,6 +938,24 @@ pub fn prior_verify(conn: &Connection, id: i64, verified: bool) -> Result<(), St
     ensure_affected(n, "先验知识", id)
 }
 
+/// R9「一键核对」：把该课程**所有未核对**的先验知识标为已核对，返回受影响的条数。
+///
+/// 为什么要一个命令而不是前端循环调 `prior_verify` N 次：
+///   N 条就是 **N 次 IPC + N 次事务**（T20 记过的教训：别用 N 次 IPC 拼一页），
+///   而且中途失败会留下"一半核对过"的中间态。这里**一条 UPDATE 一次事务**。
+///
+/// ⚠ 只动 `verified` 一列：**不碰** topic / summary / detail / source / source_ref / confidence ——
+///   "核对"是用户的确认动作，**不等于**系统改写内容（`verified` 只由用户确认，不由系统自证）。
+pub fn prior_verify_all(conn: &Connection, course_id: i64) -> Result<i64, String> {
+    let n = conn
+        .execute(
+            "UPDATE course_prior SET verified = 1 WHERE course_id = ?1 AND verified = 0",
+            [course_id],
+        )
+        .map_err(friendly)?;
+    Ok(n as i64)
+}
+
 /// 删除一条先验知识（连同其子节点，避免留下孤儿挂在树上）
 pub fn prior_delete(conn: &Connection, id: i64) -> Result<(), String> {
     let n = conn
@@ -1305,6 +1328,106 @@ pub fn material_search(
     Ok(rows)
 }
 
+/// 「关联」的检索段（R5 契约 §2.3）：一次把**三类**可能有出处的东西都查出来。
+///
+/// 为什么不是只查材料：用户点「关联」想知道的是"这段内容和我这门课已有的东西
+/// **哪里有交集**"，而交集有三种形态 ——
+///   ① 材料片段（`material_chunks`，最具体，能指到第几页）；
+///   ② 先验知识（`course_prior`，课程的骨架）；
+///   ③ 知识点（`knowledge_points`，题库与画像的公共轴）。
+/// 只给材料片段，"这个知识点其实我已经建过了"就完全看不出来 —— 那正是用户想避免的重复劳动。
+///
+/// 口径：
+///   · `keyword` 由调用方先抽好（球侧用 `pick_keyword`），本函数只负责查，不重复分词；
+///   · 空关键词 → 三个空数组（**不是错误**：没词可查是正常输入，不是失败）；
+///   · `course_id` 为 `None`（不限定课程）时三类都**不按课程过滤** ——
+///     界面写"不限定课程"，检索就必须真的不限定（`docs/11` §一 第 2 条）；
+///   · 先验知识 / 知识点用 `LIKE` **字面**匹配（`escape_like`），不做模糊联想：
+///     猜出来的"相关"没有出处，比"没找到"更坏（`docs/00` §7.3）。
+pub fn knowledge_match(
+    conn: &Connection,
+    course_id: Option<i64>,
+    keyword: &str,
+    limit: Option<i64>,
+) -> Result<Value, String> {
+    let kw = keyword.trim();
+    let limit = limit.unwrap_or(SEARCH_LIMIT_DEFAULT).clamp(1, SEARCH_LIMIT_MAX);
+    if kw.is_empty() {
+        return Ok(json!({ "kw": "", "materials": [], "priors": [], "kps": [] }));
+    }
+
+    // ① 材料片段：直接复用既有检索（FTS5 + LIKE 兜底），不另写一份检索实现。
+    //    字段名与 `material_result` 已冻结的形状逐字一致（material / page / snippet），
+    //    球侧同一段渲染代码可以直接复用。
+    let materials: Vec<Value> = material_search(conn, course_id, kw, Some(limit))?
+        .into_iter()
+        .map(|r| {
+            json!({
+                "material": r["material"],
+                "page": r["page"],
+                "snippet": r["snippet"],
+            })
+        })
+        .collect();
+
+    let pat = format!("%{}%", escape_like(kw));
+
+    // ② 先验知识：topic / summary / detail 任一命中
+    let mut sql = String::from("SELECT id, topic, summary FROM course_prior WHERE 1=1");
+    let mut args: Vec<rusqlite::types::Value> = Vec::new();
+    if let Some(cid) = course_id {
+        sql.push_str(" AND course_id = ?");
+        args.push(rusqlite::types::Value::Integer(cid));
+    }
+    sql.push_str(
+        " AND (topic LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\')",
+    );
+    for _ in 0..3 {
+        args.push(rusqlite::types::Value::Text(pat.clone()));
+    }
+    // 已核对的排前面：用户自己核对过的骨架，比 AI 生成的更值得先看一眼
+    sql.push_str(" ORDER BY verified DESC, id DESC LIMIT ?");
+    args.push(rusqlite::types::Value::Integer(limit));
+    let priors: Vec<Value> = conn
+        .prepare(&sql)
+        .map_err(friendly)?
+        .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "topic": r.get::<_, String>(1)?,
+                "summary": r.get::<_, Option<String>>(2)?,
+            }))
+        })
+        .map_err(friendly)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(friendly)?;
+
+    // ③ 知识点：按名称匹配
+    let mut sql = String::from("SELECT id, name FROM knowledge_points WHERE 1=1");
+    let mut args: Vec<rusqlite::types::Value> = Vec::new();
+    if let Some(cid) = course_id {
+        sql.push_str(" AND course_id = ?");
+        args.push(rusqlite::types::Value::Integer(cid));
+    }
+    sql.push_str(" AND name LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?");
+    args.push(rusqlite::types::Value::Text(pat));
+    args.push(rusqlite::types::Value::Integer(limit));
+    let kps: Vec<Value> = conn
+        .prepare(&sql)
+        .map_err(friendly)?
+        .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "name": r.get::<_, String>(1)?,
+            }))
+        })
+        .map_err(friendly)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(friendly)?;
+
+    Ok(json!({ "kw": kw, "materials": materials, "priors": priors, "kps": kps }))
+}
+
 /// FTS5 路径：`MATCH` + BM25 排序。
 ///
 /// **必须给每个词套双引号**：词里可能带 `-` `*` `"` `(` 等 FTS5 语法字符，
@@ -1588,8 +1711,41 @@ fn json_text(v: &Option<Value>) -> Option<String> {
     }
 }
 
-/// 会话列表（含消息数）。`course_id` 为空则返回全部会话。
-pub fn chat_sessions_list(conn: &Connection, course_id: Option<i64>) -> Result<Vec<Value>, String> {
+/// 会话来源的**合法取值**（R5 契约 §1.1）：
+///   · `app`  —— 主窗口（对话页）产生；
+///   · `ball` —— 悬浮球面板产生。
+pub const SESSION_ORIGINS: [&str; 2] = ["app", "ball"];
+
+/// 会话列表（含消息数）。
+///
+/// * `course_id` 为空 → 不限课程；
+/// * `origin` 为空 → **不过滤来源**（返回全部，与 R4 以前的行为逐字一致）；
+///   `Some("app")` / `Some("ball")` → 只看该来源。
+///
+/// **非法 `origin` 必须报错，不静默降级为"全部"**：静默会让「我只筛了悬浮球」
+/// 变成「看到一堆主窗口会话」，而界面上写的却是"只看悬浮球" —— 这正是本产品
+/// 反复强调的"界面写什么就必须按什么查"。
+pub fn chat_sessions_list(
+    conn: &Connection,
+    course_id: Option<i64>,
+    origin: Option<&str>,
+) -> Result<Vec<Value>, String> {
+    let origin = match origin {
+        None => None,
+        Some(o) => {
+            let o = o.trim();
+            if o.is_empty() {
+                None
+            } else if SESSION_ORIGINS.contains(&o) {
+                Some(o.to_string())
+            } else {
+                return Err(format!(
+                    "会话来源取值不正确（{o}）：只支持 app（主窗口）或 ball（悬浮球）。"
+                ));
+            }
+        }
+    };
+
     fn row_to_json(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         Ok(json!({
             "id": r.get::<_, i64>(0)?,
@@ -1598,26 +1754,32 @@ pub fn chat_sessions_list(conn: &Connection, course_id: Option<i64>) -> Result<V
             "summary": r.get::<_, Option<String>>(3)?,
             "created_at": r.get::<_, String>(4)?,
             "updated_at": r.get::<_, Option<String>>(5)?,
-            "message_count": r.get::<_, i64>(6)?,
+            "origin": r.get::<_, String>(6)?,
+            "message_count": r.get::<_, i64>(7)?,
         }))
     }
 
-    let filter = if course_id.is_some() {
-        " WHERE s.course_id = ?1"
-    } else {
-        ""
-    };
-    let sql = format!(
-        "SELECT s.id, s.course_id, s.title, s.summary, s.created_at, s.updated_at,
+    // 两个可选过滤条件用"按需拼 + 顺序占位符"构造，避免写 4 个分支的重复 SQL。
+    let mut sql = String::from(
+        "SELECT s.id, s.course_id, s.title, s.summary, s.created_at, s.updated_at, s.origin,
                 (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id = s.id)
-         FROM chat_sessions s{filter}
-         ORDER BY COALESCE(s.updated_at, s.created_at) DESC, s.id DESC"
+         FROM chat_sessions s WHERE 1=1",
     );
+    let mut args: Vec<rusqlite::types::Value> = Vec::new();
+    if let Some(cid) = course_id {
+        sql.push_str(" AND s.course_id = ?");
+        args.push(rusqlite::types::Value::Integer(cid));
+    }
+    if let Some(o) = origin {
+        sql.push_str(" AND s.origin = ?");
+        args.push(rusqlite::types::Value::Text(o));
+    }
+    sql.push_str(" ORDER BY COALESCE(s.updated_at, s.created_at) DESC, s.id DESC");
+
     let mut stmt = conn.prepare(&sql).map_err(friendly)?;
-    let rows = match course_id {
-        Some(cid) => stmt.query_map([cid], row_to_json).map_err(friendly)?,
-        None => stmt.query_map([], row_to_json).map_err(friendly)?,
-    };
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(args.iter()), row_to_json)
+        .map_err(friendly)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(friendly)
 }
 
@@ -1901,7 +2063,11 @@ pub fn chat_history_save(
 /// 再把结果 emit 给前端做刷新 —— 关掉主程序界面也不会丢问答（比原计划的方案更稳）。
 ///
 /// 口径：
-///   · `course_id` 指定时，用该课程**最近更新**的会话；没有就新建一个（标题「悬浮球问答」）；
+///   · `course_id` 指定时，用该课程**最近更新的球会话**（`origin = 'ball'`）；
+///     没有就新建一个（标题「悬浮球问答」，同样 `origin = 'ball'`）；
+///   · **R5 变更**：目标会话只认 `origin = 'ball'` —— 不再复用该课程里主窗口的会话。
+///     用户要的是「对话记录与主窗口分开，但都要并入知识库里」：分开的是**会话归属**，
+///     不是**存储位置**（仍是同一个库、同一张 `chat_messages`，笔记与画像照旧可引用）。
 ///   · `course_id` 指向的课程**不存在**时，退化为「不限定课程」并打日志 ——
 ///     不因为一个失效的课程 id 把这次问答整条丢掉（用户的问题已经问完了，答案就在手里）；
 ///   · 写入 `user`（问题 + 图片）与 `assistant`（回答）两条，`source_kind` 固定 `ball_ask` 以便溯源。
@@ -1930,10 +2096,12 @@ pub fn ball_append_qa(
         None => None,
     };
 
+    // R5：只认**球自己的**会话（`origin = 'ball'`）。旧实现查的是该课程"最近更新"的会话，
+    //      会把球的问答写进用户在主窗口里正在用的那个会话里 —— 那正是本轮要修掉的行为。
     let latest: Option<i64> = match course_id {
         Some(cid) => conn
             .query_row(
-                "SELECT id FROM chat_sessions WHERE course_id = ?1
+                "SELECT id FROM chat_sessions WHERE course_id = ?1 AND origin = 'ball'
                  ORDER BY COALESCE(updated_at, created_at) DESC, id DESC LIMIT 1",
                 [cid],
                 |r| r.get(0),
@@ -1942,7 +2110,7 @@ pub fn ball_append_qa(
             .map_err(friendly)?,
         None => conn
             .query_row(
-                "SELECT id FROM chat_sessions WHERE course_id IS NULL
+                "SELECT id FROM chat_sessions WHERE course_id IS NULL AND origin = 'ball'
                  ORDER BY COALESCE(updated_at, created_at) DESC, id DESC LIMIT 1",
                 [],
                 |r| r.get(0),
@@ -1960,8 +2128,8 @@ pub fn ball_append_qa(
         Some(id) => id,
         None => {
             tx.execute(
-                "INSERT INTO chat_sessions(course_id, title, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?3)",
+                "INSERT INTO chat_sessions(course_id, title, created_at, updated_at, origin)
+                 VALUES (?1, ?2, ?3, ?3, 'ball')",
                 rusqlite::params![course_id, "悬浮球问答", now],
             )
             .map_err(friendly)?;
@@ -3904,7 +4072,7 @@ mod tests {
             hist[1]["images"]
         );
         chat_session_summary_set(&conn, sid, "讨论了秩的定义").unwrap();
-        let sessions = chat_sessions_list(&conn, Some(cid)).unwrap();
+        let sessions = chat_sessions_list(&conn, Some(cid), None).unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0]["summary"], "讨论了秩的定义");
         assert_eq!(sessions[0]["message_count"], 2);
@@ -3982,9 +4150,20 @@ mod tests {
         assert_eq!(hist[0]["source_kind"], "ball_ask");
         assert_eq!(hist[1]["role"], "assistant");
         // 会话确实挂在这门课上，标题可辨认
-        let sessions = chat_sessions_list(&conn, Some(cid)).unwrap();
+        let sessions = chat_sessions_list(&conn, Some(cid), Some("ball")).unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0]["title"], "悬浮球问答");
+        // R5：球会话必须带 origin='ball'，否则主窗口会把它当成自己的会话列出来
+        assert_eq!(sessions[0]["origin"], "ball");
+
+        // R5：主窗口视角（origin='app'）**必须看不到**这条球会话 ——
+        // 这正是用户要的「对话记录与主窗口分开」
+        let app_only = chat_sessions_list(&conn, Some(cid), Some("app")).unwrap();
+        assert!(
+            app_only.is_empty(),
+            "球的问答不该出现在主窗口列表里，实际 {} 条",
+            app_only.len()
+        );
 
         // 不存在的课程 → 退化为「不限定课程」，问答照样落库（不能丢）
         let s3 = ball_append_qa(&conn, Some(999_999), "失效课程的提问", "回答照旧", &[]).unwrap();
@@ -3992,7 +4171,7 @@ mod tests {
         let hist3 = chat_history_load(&conn, s3).unwrap();
         assert_eq!(hist3.len(), 2);
         assert_eq!(hist3[0]["content"], "失效课程的提问");
-        let no_course = chat_sessions_list(&conn, None).unwrap();
+        let no_course = chat_sessions_list(&conn, None, None).unwrap();
         assert!(
             no_course.iter().any(|s| s["id"] == s3 && s["course_id"].is_null()),
             "退化后的会话必须 course_id = NULL"
@@ -5790,6 +5969,56 @@ mod tests {
         assert_eq!(both["truncated"], true);
     }
 
+    /// R9「一键核对」：只动 `verified` 一列；跨课程不许误伤；重复调用返回 0（幂等）。
+    ///
+    /// 这条断言守着两个容易写错的地方：
+    ///   ① **WHERE 少了 `course_id`** → 一键核对会把别的课也标掉（越权批改）；
+    ///   ② **顺手 UPDATE 了别的列** → "核对"变成了"改写内容"，违背
+    ///      「`verified` 只由用户确认、不由系统自证」这条口径。
+    #[test]
+    fn prior_verify_all_marks_only_unverified_of_that_course() {
+        let conn = mem();
+        let cid = course_create(&conn, "计算机系统基础", None, None, None).unwrap();
+        let other = course_create(&conn, "数据库系统", None, None, None).unwrap();
+        let a = prior_add_tree(
+            &conn,
+            cid,
+            &[json!({"topic": "指令周期"}), json!({"topic": "寻址方式"})],
+            "ai",
+            Some("AI 生成 · 待核对"),
+            None,
+        )
+        .unwrap();
+        prior_add_tree(
+            &conn,
+            other,
+            &[json!({"topic": "E-R 图"})],
+            "ai",
+            Some("AI 生成 · 待核对"),
+            None,
+        )
+        .unwrap();
+
+        // 先单独核对一条，确认"一键"只补齐**未核对**的那些
+        prior_verify(&conn, a[0], true).unwrap();
+        assert_eq!(prior_verify_all(&conn, cid).unwrap(), 1, "只应命中剩下那 1 条");
+        let rows = prior_list(&conn, cid).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r["verified"] == 1), "本课应全部已核对");
+
+        // 别的课程一条都不许动
+        assert_eq!(prior_list(&conn, other).unwrap()[0]["verified"], 0, "跨课程不许误伤");
+        assert_eq!(prior_verify_all(&conn, other).unwrap(), 1);
+        assert_eq!(prior_verify_all(&conn, other).unwrap(), 0, "重复调用返回 0（幂等）");
+
+        // 内容一个字都不许改：核对 ≠ 改写
+        let after = prior_list(&conn, cid).unwrap();
+        let one = after.iter().find(|r| r["id"] == a[1]).unwrap();
+        assert_eq!(one["topic"], "寻址方式");
+        assert_eq!(one["source"], "ai");
+        assert_eq!(one["source_ref"], "AI 生成 · 待核对");
+    }
+
     /// R1 契约 §2.3：父子映射在 Rust 侧完成、返回 id 与 items 顺序一一对应、
     /// `verified` 硬编码 0、`source` 等字段逐项落库；**任一项非法 → 整批回滚，表内无残留**。
     #[test]
@@ -5934,5 +6163,144 @@ mod tests {
         assert_eq!(sys_only["session_count_with_messages"], 0, "system 消息不可选，不算素材");
         assert_eq!(sys_only["available_count"], 0);
         assert!(sys_only["messages"].as_array().unwrap().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // R5：会话来源（origin）与关联检索（knowledge_match）
+    // -----------------------------------------------------------------------
+
+    /// `chat_sessions.origin` 的迁移与过滤。
+    ///
+    /// 三条必须钉住的：
+    ///   1. 列存在且**旧数据默认 `app`** —— R4 及以前的球问答无法溯源，**不许事后猜**；
+    ///   2. `None` = 不过滤（与 R4 以前行为逐字一致，向后兼容）；
+    ///   3. 非法值**报错**，不静默降级成"全部"。
+    #[test]
+    fn session_origin_defaults_to_app_and_list_filters_by_it() {
+        let conn = mem();
+        assert!(has_column(&conn, "chat_sessions", "origin"), "origin 列必须已迁移");
+
+        let cid = course_create(&conn, "数据结构", None, None, None).unwrap();
+        // 主窗口路径建会话：走正常 API，默认就是 app
+        let main_sid = chat_session_create(&conn, Some(cid), "主窗口的对话").unwrap();
+        // 球路径：模拟 ball_append_qa 写入的形状（origin='ball'）
+        conn.execute(
+            "INSERT INTO chat_sessions(course_id, title, created_at, updated_at, origin)
+             VALUES (?1, '悬浮球问答', '2026-01-02T10:00:00+08:00', '2026-01-02T10:00:00+08:00', 'ball')",
+            [cid],
+        )
+        .unwrap();
+
+        let all = chat_sessions_list(&conn, Some(cid), None).unwrap();
+        assert_eq!(all.len(), 2, "不传 origin = 不过滤，必须看到全部（向后兼容）");
+
+        let only_app = chat_sessions_list(&conn, Some(cid), Some("app")).unwrap();
+        assert_eq!(only_app.len(), 1);
+        assert_eq!(only_app[0]["id"], main_sid);
+        assert_eq!(only_app[0]["origin"], "app");
+
+        let only_ball = chat_sessions_list(&conn, Some(cid), Some("ball")).unwrap();
+        assert_eq!(only_ball.len(), 1);
+        assert_eq!(only_ball[0]["title"], "悬浮球问答");
+        assert_eq!(only_ball[0]["origin"], "ball");
+
+        // 空串按"不过滤"处理（前端可能传空串），但**拼错的值必须报错**
+        assert_eq!(chat_sessions_list(&conn, Some(cid), Some("")).unwrap().len(), 2);
+        let e = chat_sessions_list(&conn, Some(cid), Some("web")).unwrap_err();
+        assert!(e.contains("app"), "错误里应说清合法取值，实际：{e}");
+        assert!(e.contains("ball"), "错误里应说清合法取值，实际：{e}");
+    }
+
+    /// 球问答必须**只**落在球自己的会话里：不能复用主窗口正在用的那个会话。
+    /// 这是用户要的「对话记录与主窗口分开」在数据层的体现。
+    #[test]
+    fn ball_qa_does_not_touch_the_main_window_session() {
+        let conn = mem();
+        let cid = course_create(&conn, "操作系统", None, None, None).unwrap();
+        let main_sid = chat_session_create(&conn, Some(cid), "主窗口的对话").unwrap();
+        // 让主窗口会话"看起来最近在用"（旧实现正是按 updated_at 倒序挑它，从而把球问答写进去）
+        conn.execute(
+            "UPDATE chat_sessions SET updated_at = '2099-12-31T23:59:59+08:00' WHERE id = ?1",
+            [main_sid],
+        )
+        .unwrap();
+
+        let ball_sid = ball_append_qa(&conn, Some(cid), "图里的公式是什么", "是欧拉公式", &[]).unwrap();
+        assert_ne!(ball_sid, main_sid, "球问答绝不能写进主窗口的会话");
+
+        // 主窗口那个会话仍然只有 0 条消息（没被球污染）
+        let main_msgs = chat_history_load(&conn, main_sid).unwrap();
+        assert!(main_msgs.is_empty(), "主窗口会话被球的问答污染了");
+
+        let ball_msgs = chat_history_load(&conn, ball_sid).unwrap();
+        assert_eq!(ball_msgs.len(), 2);
+        assert_eq!(ball_msgs[0]["source_kind"], "ball_ask");
+
+        // 第二次球问答复用同一个球会话（不每问一次就新建一个）
+        let again = ball_append_qa(&conn, Some(cid), "再问一个", "再答一个", &[]).unwrap();
+        assert_eq!(again, ball_sid, "同一课程的球问答应复用同一个球会话");
+    }
+
+    /// 关联检索：三类一起查；空关键词是**正常输入**（返回三个空数组），不是错误。
+    #[test]
+    fn knowledge_match_returns_three_groups_and_tolerates_empty_keyword() {
+        let conn = mem();
+        let cid = course_create(&conn, "算法设计与分析", None, None, None).unwrap();
+        let other = course_create(&conn, "不相关课程", None, None, None).unwrap();
+
+        material_add(
+            &conn,
+            cid,
+            "第3讲-摊还分析.txt",
+            "C:/m/a.txt",
+            "txt",
+            None,
+            "local",
+            "摊还分析用于分析一系列操作的平均代价，势能法是其中一种。",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        prior_add(&conn, cid, None, "摊还分析", Some("均摊代价分析"), None, "ai", None, None).unwrap();
+        prior_add(&conn, cid, None, "二叉堆", Some("优先队列实现"), None, "user", None, None).unwrap();
+        knowledge_point_save(&conn, cid, "摊还分析", None, None).unwrap();
+        knowledge_point_save(&conn, cid, "并查集", None, None).unwrap();
+
+        // 另一门课的同名内容：按课程过滤时不该串进来
+        prior_add(&conn, other, None, "摊还分析（别的课）", None, None, "ai", None, None).unwrap();
+
+        let hit = knowledge_match(&conn, Some(cid), "摊还分析", None).unwrap();
+        assert_eq!(hit["kw"], "摊还分析");
+        assert_eq!(hit["materials"].as_array().unwrap().len(), 1, "材料片段应命中");
+        assert_eq!(hit["materials"][0]["material"], "第3讲-摊还分析.txt");
+        let priors = hit["priors"].as_array().unwrap();
+        assert_eq!(priors.len(), 1, "先验知识命中 1 条，另一门课的不许串进来");
+        assert_eq!(priors[0]["topic"], "摊还分析");
+        assert_eq!(hit["kps"].as_array().unwrap().len(), 1, "知识点命中 1 条");
+
+        // 不限定课程：三类都不按课程过滤（界面写"全部"，检索就必须真的全部）
+        let all = knowledge_match(&conn, None, "摊还分析", None).unwrap();
+        assert_eq!(all["priors"].as_array().unwrap().len(), 2, "不限课程时应看到两门课的先验知识");
+
+        // 未命中：三个空数组（不是错误）
+        let miss = knowledge_match(&conn, Some(cid), "量子纠缠", None).unwrap();
+        assert!(miss["materials"].as_array().unwrap().is_empty());
+        assert!(miss["priors"].as_array().unwrap().is_empty());
+        assert!(miss["kps"].as_array().unwrap().is_empty());
+
+        // 空关键词：正常输入 → 空结果，**不报错**（用户可能只贴了图没文字）
+        let empty = knowledge_match(&conn, Some(cid), "   ", None).unwrap();
+        assert_eq!(empty["kw"], "");
+        assert!(empty["materials"].as_array().unwrap().is_empty());
+        assert!(empty["priors"].as_array().unwrap().is_empty());
+        assert!(empty["kps"].as_array().unwrap().is_empty());
+
+        // LIKE 通配符必须按字面匹配：搜 `%` 不该把全部内容都命中
+        let pct = knowledge_match(&conn, Some(cid), "%", None).unwrap();
+        assert!(
+            pct["priors"].as_array().unwrap().is_empty(),
+            "% 必须按字面匹配，不能当通配符"
+        );
     }
 }

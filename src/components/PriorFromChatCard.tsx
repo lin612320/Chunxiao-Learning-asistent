@@ -26,7 +26,6 @@ import {
   generatePriorFromChat,
   normalizeChatCourseMessages,
   orderPriorFromChatRows,
-  PRIOR_FROM_CHAT_BUDGET,
   PRIOR_FROM_CHAT_CHANGED,
   PRIOR_FROM_CHAT_CONFIDENCE,
   PRIOR_FROM_CHAT_FETCH_LIMIT,
@@ -140,7 +139,7 @@ export default function PriorFromChatCard({ courseId, courseName }: PriorFromCha
       }
       setRows(r.items.map((it, i) => ({ ...it, key: `c${i}`, checked: true })));
       setMsg(
-        `已提炼出 ${r.items.length} 条：请逐条核对（名称 / 说明 / 详情都能改，可取消勾选）后点「确认入库」——不点确认不会写库。`,
+        `已提炼出 ${r.items.length} 条：请逐条核对（名称 / 说明 / 详情都能改，可取消勾选）后点「确认保存」——不点确认就不会存下来。`,
       );
     } catch (e) {
       setMsg(null);
@@ -219,7 +218,7 @@ export default function PriorFromChatCard({ courseId, courseName }: PriorFromCha
       }
     } catch (e) {
       setErr(
-        `入库失败：${e instanceof Error ? e.message : String(e)}（本批是整批事务，本机报错时不会留下半截数据；未写入的条目仍在预览里，可重试）`,
+        `保存失败：${e instanceof Error ? e.message : String(e)}（这一批是整体一起写的：本机报错时不会只存一半；没存进去的条目仍在预览里，可以重试）`,
       );
     } finally {
       setCommitting(false);
@@ -255,11 +254,9 @@ export default function PriorFromChatCard({ courseId, courseName }: PriorFromCha
       </div>
 
       <p className="muted prior-chat-note">
-        素材＝《{courseName}》的问答记录（本机保存）。本机会按 {PRIOR_FROM_CHAT_BUDGET}{" "}
-        字预算<b>从最新往前</b>取一段发给模型，产出一份两级知识骨架（章节 + 知识点）；生成结果
-        <b>不会自动入库</b>，必须你逐条勾选 / 修改后点「确认入库」才会写库。素材里含【春晓】自己的回答，
-        那些回答同样是 AI 生成的、<b>未经核实</b>，因此入库会标注「{PRIOR_FROM_CHAT_SOURCE_REF}」，
-        置信度按 {Math.round(PRIOR_FROM_CHAT_CONFIDENCE * 100)}% 记录（低于纯 AI 生成的 50%）。
+        从《{courseName}》的问答记录里提炼一份两层清单（章节 + 知识点）。生成结果
+        <b>不会自动保存</b>，要你逐条勾选 / 修改后点「确认保存」才会存下来。素材里含【春晓】自己的回答，
+        那些同样是 AI 生成的、<b>未经核实</b>，保存后会标注「{PRIOR_FROM_CHAT_SOURCE_REF}」。
       </p>
 
       <div className="prior-chat-bar">
@@ -286,7 +283,7 @@ export default function PriorFromChatCard({ courseId, courseName }: PriorFromCha
         </button>
         <span className="muted prior-chat-tip">
           {hasKey
-            ? `只发送这门课的问答记录（最多 ${PRIOR_FROM_CHAT_FETCH_LIMIT} 条 / ${PRIOR_FROM_CHAT_BUDGET} 字，超出按最近的截断并如实说明）；不发送材料全文，也不会自动保存。`
+            ? "只发送这门课的问答记录，不发送材料全文。"
             : "还没填模型 Key，暂时不能提炼（我们不会用模板假造一份冒充 AI 提炼的结果）。"}
         </span>
         {!hasKey && (
@@ -298,8 +295,8 @@ export default function PriorFromChatCard({ courseId, courseName }: PriorFromCha
 
       {previewMode && (
         <p className="prior-chat-warn">
-          当前是浏览器预览模式：无法读取本机问答记录（
-          <code>chat_course_messages</code> 只在桌面版可用）。这里不会假造素材，也不会假装提炼成功。
+          当前是浏览器预览模式：读不到本机的问答记录（这个功能只在桌面版可用）。
+          这里不会假造素材，也不会假装提炼成功。
         </p>
       )}
 
@@ -334,15 +331,15 @@ export default function PriorFromChatCard({ courseId, courseName }: PriorFromCha
       {rows && (
         <div className="prior-drafts">
           <div className="prior-drafts-head">
-            <b>提炼结果预览（尚未入库）</b>
+            <b>提炼结果预览（还没保存）</b>
             <span className="src-badge src-ai">{PRIOR_FROM_CHAT_SOURCE_REF}</span>
             <span className="muted" style={{ fontSize: 12 }}>
               共 {rows.length} 条 · 已选 {selectedCount} 条
             </span>
           </div>
           <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-            名称 / 一句话说明 / 详情都可以直接改；勾选子项会自动勾上它所属的章节。入库只<b>追加</b>
-            ，不会删除既有条目；未勾选的条目不会写库。
+            名称 / 一句话说明 / 详情都可以直接改；勾选子项会自动勾上它所属的章节。保存只会<b>往后加</b>
+            ，不会删掉已有的条目；没勾选的不会存下来。
           </p>
           <ul className="prior-draft-list">
             {ordered.map(({ row, depth, parentMissing }) => (
@@ -364,7 +361,7 @@ export default function PriorFromChatCard({ courseId, courseName }: PriorFromCha
                       <span className="tag">所属：{row.parent_topic}</span>
                     )}
                     {parentMissing && (
-                      <span className="tag tag-warn">所属章节未勾选 → 将作为顶层入库</span>
+                      <span className="tag tag-warn">所属章节未勾选 → 会作为顶层章节保存</span>
                     )}
                   </div>
                   <input
@@ -423,13 +420,13 @@ export default function PriorFromChatCard({ courseId, courseName }: PriorFromCha
               onClick={() => void handleCommit()}
             >
               {/* 括号里写**实际会写入**的条数（勾选数里名称为空的会被跳过，见上面的警告） */}
-              {committing ? "入库中…" : `确认入库（${tree ? tree.items.length : 0} 条）`}
+              {committing ? "保存中…" : `确认保存（${tree ? tree.items.length : 0} 条）`}
             </button>
             <button className="ghost-btn" disabled={committing} onClick={cancelDrafts}>
               取消
             </button>
             <span className="muted" style={{ fontSize: 12 }}>
-              入库后标注：来源「{PRIOR_FROM_CHAT_SOURCE_REF}」· 置信度{" "}
+              保存后标注：来源「{PRIOR_FROM_CHAT_SOURCE_REF}」· 可信度{" "}
               {Math.round(PRIOR_FROM_CHAT_CONFIDENCE * 100)}% · 待核对。
             </span>
           </div>

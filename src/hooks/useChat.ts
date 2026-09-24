@@ -27,6 +27,11 @@ import {
 } from "../lib/ai";
 // 检索范围口径与对话页**同源**（契约 `docs/11-R1…` §一 第 2 条：界面写什么就必须按什么查）
 import { effectiveScope } from "../lib/courseScope";
+// R8：把「本课上下文」（课程名 + 知识骨架条目名）注入系统提示词 ——
+//     否则「先查材料」0 命中时，模型根本不知道自己在上哪门课（详见该文件头部的现场缺陷记录）。
+import { buildCourseBlock } from "../lib/courseContext";
+import { useCourses } from "./useCourses";
+import { loadPriorList } from "./useQuestions";
 // R4：图片提问的路由（直接发图 / 先转成文字）与能力启发式判定
 import { looksVisionCapable, transcribeDataUrls } from "../lib/vision";
 import type { ImageMode } from "./useSettings";
@@ -40,8 +45,7 @@ import {
   SEARCH_FAILED_BLOCK,
 } from "../lib/materials";
 
-/** 未配置 Key 时的固定演示回复（不调模型，明确说明这不是 AI 回答） */
-export const DEMO_REPLY = [
+/** 未配置 Key 时的固定演示回复（不调模型，明确说明这不是 AI 回答） */export const DEMO_REPLY = [
   "【演示模式 · 这不是 AI 的回答】",
   "",
   "本机还没有配置模型 API Key，所以春晓没有调用任何模型，上面这段是程序写死的说明文案。",
@@ -70,6 +74,14 @@ export interface UseChatOptions {
   vision?: AIConfig | null;
   /** R4：图片提问方式（默认 `auto`） */
   imageMode?: ImageMode;
+  /**
+   * R5：会话列表**是否包含悬浮球的记录**（`origin = "ball"`）。
+   *
+   * 默认 `false` —— 用户要的是「对话记录与主窗口分开，但都要并入知识库里」：
+   * 分开的是**默认可见范围**，不是存储位置（球与主窗口用同一个库、同一张 `chat_messages`，
+   * 笔记与画像照旧能引用球的问答）。打开后列全部，球的会话带 `球` 徽标。
+   */
+  includeBall?: boolean;
 }
 
 /**
@@ -87,6 +99,37 @@ export interface SearchTrace {
   failed: boolean;
 }
 
+/**
+ * R5：会话列表来源口径。
+ *
+ * `SESSION_ORIGIN_APP` = 主窗口自己产生的会话；`SESSION_ORIGIN_BALL` = 悬浮球产生的会话。
+ * 值必须与 Rust 侧 `db::SESSION_ORIGINS` **逐字一致**（`app` / `ball`）——
+ * 传错会被 Rust 拒绝（报可读中文错误），而不是静默返回全部。
+ */
+export const SESSION_ORIGIN_APP = "app";
+export const SESSION_ORIGIN_BALL = "ball";
+
+/** 「含悬浮球记录」开关的本地偏好键（沿用既有 `chunxiao:` 前端偏好约定） */
+export const LS_INCLUDE_BALL = "chunxiao:chat-include-ball";
+
+/** 读「含悬浮球记录」开关；默认 **false**（默认不列球的记录） */
+export function readIncludeBall(): boolean {
+  try {
+    return localStorage.getItem(LS_INCLUDE_BALL) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** 写「含悬浮球记录」开关（localStorage 不可用时静默忽略，不影响功能） */
+export function writeIncludeBall(v: boolean): void {
+  try {
+    localStorage.setItem(LS_INCLUDE_BALL, v ? "1" : "0");
+  } catch {
+    /* 隐私模式下写不了：不影响本次会话内的开关状态 */
+  }
+}
+
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -98,7 +141,10 @@ function nowStr(): string {
 }
 
 export function useChat(opts: UseChatOptions) {
-  const { ai, hasKey, courseId, vision = null, imageMode = "auto" } = opts;
+  const { ai, hasKey, courseId, vision = null, imageMode = "auto", includeBall = false } = opts;
+
+  /** R8：课程名要跟着「有效课程」走，所以这里复用与侧栏/顶栏同一份课程列表（同一个 hook，不另取一份） */
+  const { courses: allCourses } = useCourses();
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentId, setCurrentId] = useState<number | null>(null);
@@ -140,17 +186,24 @@ export function useChat(opts: UseChatOptions) {
   // -------------------------------------------------------------------------
 
   const listSessions = useCallback(async (): Promise<ChatSession[]> => {
+    // R5：默认只列**主窗口**的会话。`includeBall` 打开时不传 `origin`（Rust 侧 = 不过滤，列全部）。
+    const origin = includeBall ? undefined : SESSION_ORIGIN_APP;
     if (isTauri()) {
+      const args: Record<string, unknown> = {};
+      if (courseId != null) args.courseId = courseId;
+      if (origin) args.origin = origin;
       const list = await callRust<ChatSession[]>(
         "chat_sessions_list",
-        courseId != null ? { courseId } : undefined,
+        Object.keys(args).length > 0 ? args : undefined,
       );
       return Array.isArray(list) ? list : [];
     }
     const db = loadSampleDb();
-    const all = db.sessions;
-    return (courseId != null ? all.filter((s) => s.course_id === courseId) : all).slice();
-  }, [courseId]);
+    // 缺省按 app 处理，与 Rust 侧 `origin TEXT NOT NULL DEFAULT 'app'` 同口径
+    const all = db.sessions.map((s) => ({ ...s, origin: s.origin ?? SESSION_ORIGIN_APP }));
+    const scoped = courseId != null ? all.filter((s) => s.course_id === courseId) : all;
+    return (includeBall ? scoped : scoped.filter((s) => s.origin === SESSION_ORIGIN_APP)).slice();
+  }, [courseId, includeBall]);
 
   const refreshSessions = useCallback(async () => {
     const list = await listSessions();
@@ -412,14 +465,18 @@ export function useChat(opts: UseChatOptions) {
       let sysExtra = "";
       let refs: MsgRef[] = [];
       let sourceKind: string | null = null;
+      // 检索范围 / 本课上下文共用同一个「有效课程」：
+      //   **当前会话归属优先，其次 URL 课程上下文**，两者都没有 → null（全库）。
+      //   口径与对话页的 `scopeText` 同源（`lib/courseScope.effectiveScope`）：
+      //   界面写"全库"就必须查全库、写某课就必须只查该课（契约 §一 第 2 条）。
+      //   ⚠ R8：提到 `if (useMaterials)` **外面** —— 本课上下文与"要不要查材料"无关：
+      //     关掉「先查材料」也要知道自己在上哪门课（否则 IR 又会被当成通用缩写）。
+      const ownCourse = sessions.find((se) => se.id === sid)?.course_id ?? null;
+      const effectiveCourse = effectiveScope(ownCourse, courseId ?? null).courseId;
       if (useMaterials) {
         setSearching(true);
         try {
-          // 检索范围：**当前会话归属优先，其次 URL 课程上下文**，两者都没有 → null（全库）。
-          // 口径与对话页的 `scopeText` 同源（`lib/courseScope.effectiveScope`）：
-          // 界面写"全库"就必须查全库、写某课就必须只查该课（契约 §一 第 2 条）。
-          const ownCourse = sessions.find((se) => se.id === sid)?.course_id ?? null;
-          const searchCourse = effectiveScope(ownCourse, courseId ?? null).courseId;
+          const searchCourse = effectiveCourse;
           // M2：中文提问通常没有空格，先抽内容关键词再检索（否则整句进 FTS/LIKE 几乎必然 0 命中）；
           // 抽不出来时 extractSearchTermsWithInfo 会退回整句，并把 fallback 标出来给 UI 如实说明。
           const picked = extractSearchTermsWithInfo(content, 3);
@@ -551,7 +608,23 @@ export function useChat(opts: UseChatOptions) {
       const base = [...withUser, acc];
       applyMessages(base);
 
-      const sys = sysExtra ? `${systemPromptFor(mode)}\n\n${sysExtra}` : systemPromptFor(mode);
+      // —— R8：本课上下文（课程名 + 知识骨架条目名）——
+      //   这是「模型不知道自己在上哪门课」那个现场缺陷的修法：材料为空时，
+      //   这是**唯一**能告诉模型"IR 在《计算机系统基础》里指指令寄存器"的东西。
+      //   拿不到课程名 / 读不到骨架都**不拦提问**（这一块只是语境，不是依据）。
+      let courseBlock = "";
+      if (effectiveCourse != null) {
+        const courseName = allCourses.find((c) => c.id === effectiveCourse)?.name ?? "";
+        let topics: string[] = [];
+        try {
+          topics = (await loadPriorList(effectiveCourse)).map((p) => p.topic);
+        } catch {
+          /* 见上：读不到骨架不影响回答 */
+        }
+        courseBlock = buildCourseBlock(courseName, topics);
+      }
+
+      const sys = [systemPromptFor(mode), courseBlock, sysExtra].filter(Boolean).join("\n\n");
       // R4：只有**本轮**这条用户消息带图片 / 转写补充；历史一律纯文本 ——
       //   多轮图片会把上下文与费用顶爆，且历史图对当前问题通常没有增量信息。
       //   注意过滤条件要放行"只有图、没有文字"的消息（否则它会被整条丢掉）。

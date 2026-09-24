@@ -11,8 +11,9 @@
 // 图表（掌握度热力图 / 条状图）全部是纯 CSS + DOM 手写，不引入任何图表库。
 
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useProfile } from "../hooks/useProfile";
+import { parseCourseParam } from "../lib/courseScope";
 import { isTauri } from "../lib/tauri";
 import {
   BAND_LABEL,
@@ -172,6 +173,9 @@ function DeclaredRow({ row, kpName }: { row: ProfileTraitRow; kpName: (id: numbe
 }
 
 export default function Profile() {
+  // R9：URL 的 `?course=N` 就是本页的统计范围（侧栏/顶栏切课程立刻跟着切）
+  const { search } = useLocation();
+  const lockedCourseId = parseCourseParam(search);
   const {
     courses,
     coursesLoading,
@@ -185,7 +189,6 @@ export default function Profile() {
     conclusions,
     weakPoints,
     insufficient,
-    guardedCount,
     declaredGaps,
     preferences,
     knowledgePoints,
@@ -196,7 +199,7 @@ export default function Profile() {
     saveTrait,
     markDeclared,
     addDeclaredGap,
-  } = useProfile();
+  } = useProfile(lockedCourseId);
 
   const navigate = useNavigate();
   const preview = !isTauri();
@@ -302,22 +305,25 @@ export default function Profile() {
           ------------------------------------------------------------------ */}
       <section className="card pf-toolbar">
         <div className="pf-toolbar-left">
-          <label className="pf-field">
-            <span className="pf-field-label">统计范围</span>
-            <select
-              value={courseId ?? ""}
-              disabled={coursesLoading || courses.length === 0}
-              onChange={(e) => setCourseId(e.target.value ? Number(e.target.value) : null)}
-            >
-              {courses.length === 0 ? <option value="">（本机还没有课程）</option> : null}
-              {courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.archived === 1 ? "（已归档）" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+          {/* R9：有课程上下文时不显示选择器（范围由侧栏 + 顶栏负责，避免三处重复、也避免"写着 A 课查 B 课"） */}
+          {lockedCourseId == null ? (
+            <label className="pf-field">
+              <span className="pf-field-label">统计范围</span>
+              <select
+                value={courseId ?? ""}
+                disabled={coursesLoading || courses.length === 0}
+                onChange={(e) => setCourseId(e.target.value ? Number(e.target.value) : null)}
+              >
+                {courses.length === 0 ? <option value="">（本机还没有课程）</option> : null}
+                {courses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {c.archived === 1 ? "（已归档）" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {courseName ? <span className="pf-toolbar-note">当前课程：{courseName}</span> : null}
         </div>
         <button type="button" className="ghost-btn" onClick={() => void refresh()} disabled={loading || courseId == null}>
@@ -358,27 +364,16 @@ export default function Profile() {
       <section className="card pf-block">
         <div className="section-head">
           <h2>掌握度 · 本机统计</h2>
-          <span className="pf-section-note">只统计你在这台电脑上的作答</span>
         </div>
 
         {courseId == null ? (
-          <p className="empty">暂无课程：请先到「课程」页新建一门课程，画像按课程统计。</p>
+          <p className="empty">暂无课程。</p>
         ) : loading && !overview ? (
-          <p className="loading-line">正在读取本机作答统计…</p>
+          <p className="loading-line">读取中…</p>
         ) : isEmpty ? (
-          <p className="empty">
-            暂无记录：这门课程还没有作答记录，所以没有可统计的掌握度（不画假的曲线）。
-            <br />
-            到「题库」页做几道题之后，这里会出现按知识点聚合的<strong>本机统计</strong>。
-          </p>
+          <p className="empty">暂无记录。</p>
         ) : (
           <>
-            {guardedCount > 0 ? (
-              <p className="pf-guard-note">
-                有 {guardedCount} 个知识点因为作答次数太少，已挪到下面的灰态区（不显示数字）。
-              </p>
-            ) : null}
-
             {conclusions.length + insufficient.length > 0 ? (
               <div className="pf-heat">
                 {[...conclusions].sort((a, b) => (b.mastery ?? 0) - (a.mastery ?? 0)).map((r) => (
@@ -433,7 +428,7 @@ export default function Profile() {
             ) : null}
 
             {conclusions.length === 0 && insufficient.length === 0 ? (
-              <p className="empty">暂无记录：这门课程还没有作答记录，所以没有可统计的掌握度。</p>
+              <p className="empty">暂无记录。</p>
             ) : null}
           </>
         )}
@@ -445,14 +440,9 @@ export default function Profile() {
       <section className="card pf-block">
         <div className="section-head">
           <h2>弱项 · 本机统计</h2>
-          <span className="pf-section-note">
-            按掌握度从低到高列出，最多 10 条。这只是排序，不代表这些都不及格；每条都标出支撑的作答次数。
-          </span>
         </div>
         {weakPoints.length === 0 ? (
-          <p className="empty">
-            暂无弱项：样本足够（≥ {minEvidence} 次）的知识点还不够，或这门课程还没有作答记录。
-          </p>
+          <p className="empty">暂无弱项。</p>
         ) : (
           <ul className="pf-weak-list">
             {weakPoints.map((r) => (
@@ -468,9 +458,6 @@ export default function Profile() {
       <section className="card pf-block pf-declared-block">
         <div className="section-head">
           <h2>你说的 · 自述缺漏</h2>
-          <span className="pf-section-note">
-            这一块是<strong>你自己说的</strong>：只记录在本机、只用来调整出题顺序，不会当成统计结论。
-          </span>
         </div>
 
         {declaredGaps.length > 0 ? (
@@ -485,9 +472,7 @@ export default function Profile() {
 
         <h4 className="pf-sub-title">勾选「我哪里薄弱」</h4>
         {knowledgePoints.length === 0 ? (
-          <p className="muted">
-            这门课程还没有知识点：可以先去「题库」页点「从先验知识同步知识点」，或直接在下面录入一个名字。
-          </p>
+          <p className="muted">这门课还没有知识点：可以在下面直接录入一个。</p>
         ) : (
           <div className="pf-check-grid">
             {knowledgePoints.map((k) => (
@@ -535,9 +520,6 @@ export default function Profile() {
       <section className="card pf-block">
         <div className="section-head">
           <h2>偏好与风格 · 本机录入</h2>
-          <span className="pf-section-note">
-            这两项只调整<strong>本机</strong>的解释粒度与讲解顺序（1–5 档），不会改变模型。
-          </span>
         </div>
 
         <div className="pf-pref-grid">

@@ -10,6 +10,16 @@ declare module "*.svg" {
 }
 
 /**
+ * R11：位图形象（`src/assets/mascot-maid.webp`）。
+ * ⚠ 仍然**不要**用 `vite/client`：理由同上（会把 `import.meta.hot` 变成有类型，
+ *   让 `lib/ball.ts` 里的 `@ts-expect-error` 变成多余指令）。这里只补 webp 一条。
+ */
+declare module "*.webp" {
+  const src: string;
+  export default src;
+}
+
+/**
  * 由 `vite.config.ts` 的 `define` 注入：值来自 **package.json 的 version**。
  * 界面上凡是需要显示版本号的地方都读它，避免手写字符串后慢慢与真实版本漂移。
  * （构建期被替换成字面量，运行时不存在这个全局变量。）

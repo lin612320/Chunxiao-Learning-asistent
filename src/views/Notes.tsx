@@ -13,10 +13,11 @@
 // 不碰 styles.css 的设计令牌，本页样式全部写在 `Notes.css` 里。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useCourses } from "../hooks/useCourses";
 import { useSettings } from "../hooks/useSettings";
 import { useNoteDetail, useNotes } from "../hooks/useNotes";
+import { parseCourseParam } from "../lib/courseScope";
 import Markdown from "../lib/markdown";
 import Highlight, { normalizeTerms } from "../lib/highlight";
 import { isTauri } from "../lib/tauri";
@@ -104,13 +105,44 @@ function courseNameOf(courses: Array<{ id: number; name: string }>, id: number):
 export default function Notes() {
   const { courses } = useCourses();
   const { s, hasKey } = useSettings();
+  /**
+   * R6：URL 上的 `?course=N` = **本页被锁定到这门课**（侧栏按课程进入时带的）。
+   * 锁定时：不再显示「按课程筛选」（侧栏已经选过课了），列表也只列这门课的笔记。
+   */
+  const { search } = useLocation();
+  const lockedCourseId = parseCourseParam(search);
 
   // —— 列表 ——
   const [courseFilter, setCourseFilter] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  /** 生效的课程范围：URL 锁定优先，其次页面内筛选 */
+  const scopeCourseId = lockedCourseId ?? courseFilter;
   const { notes, loading, error: listError, setError: setListError, reload, createNote, removeNote } =
-    useNotes(courseFilter);
+    useNotes(scopeCourseId);
   const detail = useNoteDetail(selectedId);
+
+  /**
+   * R9：**按天分组**（用户要求「按天整理」）。
+   *
+   * - 自己写的（`source='user'`）与 AI 从对话整理的（`source='ai_session'`）**混在同一组里**，
+   *   靠来源徽标区分 —— 用户要的是"按天看笔记"，不是"按来源分两个列表"；
+   * - 日期倒序（最近的在前）；
+   * - 没有日期的（老数据 / 手动写且没填日期）归到最后的「未标日期」组，**不猜日期**。
+   */
+  const notesByDay = useMemo(() => {
+    const groups = new Map<string, NoteRow[]>();
+    for (const n of notes) {
+      const key = n.date && n.date.trim() ? n.date.trim() : "未标日期";
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(n);
+      else groups.set(key, [n]);
+    }
+    return Array.from(groups.entries()).sort((a, b) => {
+      if (a[0] === "未标日期") return 1;
+      if (b[0] === "未标日期") return -1;
+      return b[0].localeCompare(a[0]);
+    });
+  }, [notes]);
 
   // —— 提示 ——
   const [notice, setNotice] = useState<string | null>(null);
@@ -131,6 +163,53 @@ export default function Notes() {
   const [savingDraft, setSavingDraft] = useState(false);
   /** 保存后要选中的笔记 id（等列表刷新完再选中，避免被"自动选第一条"抢走） */
   const pendingSelect = useRef<number | null>(null);
+
+  // —— 手动写笔记（R6：用户要求「笔记需要支持随时手动写入」）——
+  // ⚠ 不复用"先建一条空笔记"的路子：Rust 侧**标题与正文都不许为空**（诚实口径），
+  //   所以这里先打开编辑区，用户写好了再入库 —— 与"生成草稿 → 确认才保存"同一套纪律。
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualContent, setManualContent] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
+  const [manualErr, setManualErr] = useState<string | null>(null);
+
+  /** 手动写入的归属课程：锁定的课程优先，否则用生成区选的那门，最后兜底第一门未归档课程 */
+  const manualCourseId =
+    lockedCourseId ?? genCourseId ?? courses.find((c) => !c.archived)?.id ?? courses[0]?.id ?? null;
+
+  async function handleSaveManual() {
+    if (manualCourseId == null) {
+      setManualErr("请先选一门课程：笔记必须归属到某门课。");
+      return;
+    }
+    const title = manualTitle.trim();
+    const content = manualContent.trim();
+    if (!title) {
+      setManualErr("请填笔记标题。");
+      return;
+    }
+    if (!content) {
+      setManualErr("请写点内容再保存（空笔记不落库）。");
+      return;
+    }
+    setManualBusy(true);
+    setManualErr(null);
+    const id = await createNote({
+      courseId: manualCourseId,
+      title,
+      contentMd: content,
+      date: todayStr(),
+      source: "user",
+    });
+    setManualBusy(false);
+    if (id != null) {
+      pendingSelect.current = id;
+      setManualOpen(false);
+      setManualTitle("");
+      setManualContent("");
+      setNotice("已保存这条笔记（来源标「自己写的」）。");
+    }
+  }
 
   // —— 导出 / 打印 ——
   const [exportDir, setExportDir] = useState<string>(() => readExportDir());
@@ -241,7 +320,7 @@ export default function Notes() {
         messageCount: day.messages.length,
         sessionCount: day.sessionCount,
       });
-      setGenMsg(`已生成草稿（${r.content.length} 字）：请核对后点「保存到笔记」——不点保存不会入库。`);
+      setGenMsg(`已生成草稿（${r.content.length} 字）：请核对后点「保存到笔记」——不点保存就只是草稿。`);
     } catch (e) {
       setGenMsg(null);
       setGenErr(`读取问答记录失败：${errText(e)}`);
@@ -576,17 +655,6 @@ export default function Notes() {
 
   return (
     <div className="notes-page page-stack">
-      <div className="section-head">
-        <div>
-          <h2 style={{ marginBottom: 4 }}>笔记</h2>
-          <span className="muted">
-            把当天的问答记录整理成 Markdown 笔记；AI 整理的内容一律标「AI 整理 · 待核对」，
-            自己写的标「自己写的」。面向课后理解与复习，不面向考试。
-          </span>
-        </div>
-        <span className="tag">本地单机 · 数据在本机</span>
-      </div>
-
       {!isTauri() && (
         <div className="demo-banner">
           <span>
@@ -608,13 +676,69 @@ export default function Notes() {
         </div>
       )}
 
+      {/* ---------------- 手动写笔记（R6） ---------------- */}
+      <section className="card no-print">
+        {!manualOpen ? (
+          <div className="notes-list-head" style={{ marginBottom: 0 }}>
+            <h3 style={{ margin: 0 }}>自己写一条</h3>
+            <button
+              className="primary small"
+              disabled={manualCourseId == null}
+              title={
+                manualCourseId == null
+                  ? "还没有课程：先在「课程」页新建一门"
+                  : "直接写一条笔记（来源标「自己写的」）"
+              }
+              onClick={() => {
+                setManualOpen(true);
+                setManualErr(null);
+                setManualTitle("");
+                setManualContent("");
+              }}
+            >
+              <Icon name="plus" size={15} /> 新建笔记
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="notes-field" style={{ marginBottom: 8 }}>
+              <span>标题</span>
+              <input
+                autoFocus
+                value={manualTitle}
+                placeholder="例如：第 3 讲 · 摊还分析"
+                onChange={(e) => setManualTitle(e.target.value)}
+              />
+            </div>
+            <div className="notes-field" style={{ marginBottom: 8 }}>
+              <span>正文（Markdown）</span>
+              <textarea
+                rows={8}
+                value={manualContent}
+                placeholder={"直接写就行，支持 Markdown：\n\n## 要点\n- 第一条\n- 第二条\n\n> 存疑的地方先记下来"}
+                onChange={(e) => setManualContent(e.target.value)}
+              />
+            </div>
+            {manualErr && <div className="settings-msg err">{manualErr}</div>}
+            <div className="notes-gen-bar">
+              <button className="primary small" disabled={manualBusy} onClick={() => void handleSaveManual()}>
+                {manualBusy ? "保存中…" : "保存笔记"}
+              </button>
+              <button className="ghost-btn" onClick={() => setManualOpen(false)}>
+                取消
+              </button>
+              <span className="muted" style={{ fontSize: 12 }}>
+                归属：{manualCourseId == null ? "（还没有课程）" : courseNameOf(courses, manualCourseId)} ·
+                来源会标「自己写的」
+              </span>
+            </div>
+          </>
+        )}
+      </section>
+
       {/* ---------------- 生成笔记 ---------------- */}
       <section className="card notes-gen-card no-print">
-        <h3>生成笔记</h3>
-        <p className="muted hint">
-          选课程 + 日期 → 读取<b>这门课当天</b>的问答记录 → 由模型整理成 Markdown 草稿 →
-          <b>你核对并点「保存到笔记」才会入库</b>。记录里没有的内容不会凭空补，存疑处会标「待确认」。
-        </p>
+        <h3>从当天对话整理</h3>
         <div className="notes-gen-bar">
           <label className="notes-field">
             <span>课程</span>
@@ -638,11 +762,7 @@ export default function Notes() {
           <button
             className="primary small"
             disabled={!hasKey || genBusy || savingDraft}
-            title={
-              hasKey
-                ? "读取该课程当天的问答记录并整理成 Markdown 草稿；生成的内容不会自动保存"
-                : "未配置模型 API Key，无法调用模型整理"
-            }
+            title={hasKey ? "按这一天的问答记录整理成草稿" : "未配置模型 API Key，无法调用模型整理"}
             onClick={() => void handleGenerate()}
           >
             {genBusy ? (
@@ -654,11 +774,6 @@ export default function Notes() {
               </>
             )}
           </button>
-          <span className="muted notes-gen-tip">
-            {hasKey
-              ? "只会把这一天的问答记录发给模型；不发送材料全文，也不会自动保存。"
-              : "还没填模型 Key，暂时不能生成（我们不会用模板假造一份笔记冒充 AI 整理）。"}
-          </span>
           {!hasKey && (
             <Link to="/settings" className="ghost-btn" style={{ textDecoration: "none" }}>
               去「数据设置」配置 →
@@ -681,18 +796,17 @@ export default function Notes() {
         {draft && (
           <div className="notes-draft">
             <div className="notes-draft-head">
-              <b>草稿预览（尚未入库）</b>
+              <b>草稿预览（还没保存）</b>
               <span className="src-badge src-ai">AI 整理 · 待核对</span>
               <span className="muted" style={{ fontSize: 12 }}>
                 来自 {draft.messageCount} 条消息 / {draft.sessionCount} 个会话 · 正文 {draft.content.length} 字
               </span>
             </div>
             <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-              标题与正文都可以直接改（正文是 Markdown）；只有点「保存到笔记」才会写库，来源固定标为
-              「AI 整理 · 待核对」。
+              标题与正文都能直接改；点「保存到笔记」才会存下来。
               {draft.titleFromModel
                 ? ""
-                : "（模型没给出一级标题，当前标题是本地按「课程 + 日期」拼的，请自行确认。）"}
+                : "（标题是本地按「课程 + 日期」拼的，请自行确认。）"}
             </p>
             <input
               className="notes-input"
@@ -737,58 +851,76 @@ export default function Notes() {
         {/* ---------------- 列表 ---------------- */}
         <section className="card notes-list-card no-print">
           <div className="notes-list-head">
-            <h3 style={{ margin: 0 }}>全部笔记（{notes.length}）</h3>
-            <label className="notes-field">
-              <span>按课程筛选</span>
-              <select
-                value={courseFilter ?? ""}
-                onChange={(e) => setCourseFilter(e.target.value ? Number(e.target.value) : null)}
-              >
-                <option value="">全部课程</option>
-                {courses.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {c.archived ? "（已归档）" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <h3 style={{ margin: 0 }}>
+              {lockedCourseId != null
+                ? `本课笔记（${notes.length}）`
+                : `全部笔记（${notes.length}）`}
+            </h3>
+            {/* R6：侧栏已经选过课程时不显示筛选器 —— 当前范围由顶栏的课程胶囊说明 */}
+            {lockedCourseId == null && (
+              <label className="notes-field">
+                <span>按课程筛选</span>
+                <select
+                  value={courseFilter ?? ""}
+                  onChange={(e) => setCourseFilter(e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">全部课程</option>
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.archived ? "（已归档）" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
 
           {loading ? (
             <p className="loading-line">加载中…</p>
           ) : notes.length === 0 ? (
-            <p className="empty">
-              这里还没有笔记。可以在上面用「当天问答记录」生成一份（生成后需要你确认才入库）。
-            </p>
+            <p className="empty">这里还没有笔记。</p>
           ) : (
-            <ul className="notes-list">
-              {notes.map((n) => {
-                const info = noteSourceInfo(n.source);
-                return (
-                  <li key={n.id} className={"notes-item" + (n.id === selectedId ? " active" : "")}>
-                    <button
-                      type="button"
-                      className="notes-item-main"
-                      onClick={() => setSelectedId(n.id)}
-                      title="点开查看正文、批注与导出"
-                    >
-                      <span className="notes-item-title">{n.title}</span>
-                      <span className="notes-item-meta">
-                        <span className={info.cls}>{info.text}</span>
-                        <span className="tag">{n.date || "未标日期"}</span>
-                        {n.exported ? <span className="tag notes-tag-ok">已导出</span> : null}
-                        <span className="tag">{n.content_len} 字</span>
-                        <span className="muted">{courseNameOf(courses, n.course_id)}</span>
-                      </span>
-                    </button>
-                    <button className="danger-btn" disabled={detail.busy} onClick={() => void handleDeleteNote(n)}>
-                      删除
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            /* R9：**按天分组**（用户要求"按天整理"）。
+               自己写的（`source='user'`）与 AI 从对话整理的（`source='ai_session'`）**同列在一起**，
+               靠来源徽标区分；日期倒序，排在最后的是"未标日期"那一组。 */
+            notesByDay.map(([day, items]) => (
+              <div className="notes-day" key={day}>
+                <div className="notes-day-head">
+                  <span className="notes-day-label">{day}</span>
+                  <span className="notes-day-count">{items.length} 条</span>
+                </div>
+                <ul className="notes-list">
+                  {items.map((n) => {
+                    const info = noteSourceInfo(n.source);
+                    return (
+                      <li key={n.id} className={"notes-item" + (n.id === selectedId ? " active" : "")}>
+                        <button
+                          type="button"
+                          className="notes-item-main"
+                          onClick={() => setSelectedId(n.id)}
+                        >
+                          <span className="notes-item-title">{n.title}</span>
+                          <span className="notes-item-meta">
+                            <span className={info.cls}>{info.text}</span>
+                            {n.exported ? <span className="tag notes-tag-ok">已导出</span> : null}
+                            <span className="tag">{n.content_len} 字</span>
+                            <span className="muted">{courseNameOf(courses, n.course_id)}</span>
+                          </span>
+                        </button>
+                        <button
+                          className="danger-btn"
+                          disabled={detail.busy}
+                          onClick={() => void handleDeleteNote(n)}
+                        >
+                          删除
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))
           )}
         </section>
 
@@ -797,7 +929,7 @@ export default function Notes() {
           {detail.loading ? (
             <p className="loading-line">加载中…</p>
           ) : !detail.note || !src ? (
-            <p className="empty">从左边选一条笔记，就能看正文、加批注、导出。</p>
+            <p className="empty">从左边选一条笔记。</p>
           ) : (
             <>
               <div className="notes-toolbar no-print">

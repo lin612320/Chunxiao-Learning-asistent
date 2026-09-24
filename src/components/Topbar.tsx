@@ -1,34 +1,31 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useCurrentPage } from "../nav";
 import { ballShow } from "../lib/ball";
+import { useCourses } from "../hooks/useCourses";
+import { parseCourseParam } from "../lib/courseScope";
 import { applyTheme, readStoredTheme, THEME_EVENT, type Theme } from "../hooks/useSettings";
 import Icon from "./Icon";
 
 /**
- * 顶栏（R3 打磨）。
+ * 顶栏（R3 打磨，R6 去噪）。
  *
- * 两个要点：
- *   1. **emoji 全部换成内联 SVG 图标**：🎯 ☀️ 🌙 在不同系统上字形不同、基线不可控、
- *      颜色不跟随主题，是"界面不高级"的典型来源；SVG 走 `currentColor`，随主题变化。
- *   2. 标题右侧补一句**大白话说明**（"这一页是干什么的"）——
- *      原顶栏只有一个版块名，用户进来常常不知道从哪下手。说明里**不写任何实现口径**。
+ * R6 的两处改动：
+ *   1. **删掉标题下那句说明**（`PAGE_HINT`）—— 用户要求「提示的东西太多，界面不简洁」；
+ *      它与侧栏、页面内文案重复，删掉后每页少一行。
+ *   2. 标题旁新增**当前课程**胶囊：导航改成"课程优先"之后，
+ *      「我现在在哪门课里」必须**始终可见**，否则用户会分不清看到的笔记属于谁。
+ *      （课程名从 `?course=N` 解析，与侧栏、各页面同源。）
  */
-const PAGE_HINT: Record<string, string> = {
-  home: "从哪里接着学",
-  courses: "先验知识、材料与课程对话",
-  assistant: "先查你的课程材料，再回答并标明出处",
-  notes: "把课堂与对话整理成可复习的笔记",
-  questions: "按知识点生成题目、练习与错题重练",
-  profile: "掌握度与弱项，只统计本机的作答记录",
-  focus: "专注计时与近 7 天统计",
-  settings: "模型接入、外观与数据备份",
-};
-
 export default function Topbar() {
   const page = useCurrentPage();
   const nav = useNavigate();
+  const { courses } = useCourses();
+  const { search } = useLocation();
   const [theme, setTheme] = useState<Theme>(() => readStoredTheme());
+
+  const courseId = parseCourseParam(search);
+  const course = courseId != null ? courses.find((c) => c.id === courseId) : undefined;
 
   // 应用主题；同时监听设置页切换主题的事件，保证两个入口不打架
   useEffect(() => {
@@ -45,30 +42,25 @@ export default function Topbar() {
   }, []);
 
   const dark = theme === "dark";
-  const hint = PAGE_HINT[page.key];
 
   return (
     <header className="topbar">
       <div className="topbar-title">
         <h1 className="page-title">{page.label}</h1>
-        {hint && <p className="page-sub">{hint}</p>}
+        {course && (
+          <span className="course-chip" title="当前课程：侧栏与各页面的内容都属于它">
+            {course.name}
+          </span>
+        )}
       </div>
       <div className="topbar-actions">
         <button
           className="ghost-btn"
           onClick={() => void ballShow()}
-          title="唤起桌面悬浮球：选中文字就能随时提问"
+          title="唤起桌面悬浮球：选中文字或截图就能随时问"
         >
           <Icon name="target" />
           悬浮球
-        </button>
-        <button
-          className="ghost-btn"
-          onClick={() => nav("/assistant")}
-          title="打开与春晓的对话"
-        >
-          <Icon name="chat" />
-          对话
         </button>
         <button
           className="ghost-btn"

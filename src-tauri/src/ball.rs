@@ -317,6 +317,14 @@ struct BridgeMsg {
     /// R4 新增：本轮图片的 dataURL（供主程序落库）
     #[serde(default)]
     images: Option<Vec<String>>,
+    /// R5 新增：`relate_save` 要写入的先验知识候选（形状与前端 `PriorDraft` 逐字一致）。
+    /// 一律 `#[serde(default)]`：缺字段要退化成"没有候选"，不能让整条消息反序列化失败
+    /// 后被轮询线程静默丢弃（R4 的 `set_course` 就是这么踩过一次）。
+    #[serde(default)]
+    items: Option<Vec<serde_json::Value>>,
+    /// R5 新增：`relate_save` 的原文摘要（落进 `course_prior.source_ref`，可空）
+    #[serde(default)]
+    source_ref: Option<String>,
 }
 
 /// 已消费的消息时间戳（避免重复处理）
@@ -364,6 +372,14 @@ fn ai_config_of(conn: &rusqlite::Connection) -> Option<serde_json::Value> {
     // 库里是 enc. 密文，给球之前先解成明文（球侧会用自己的盐重新加密落盘）
     let key = keycrypt::decrypt(&get("ai.api_key"));
     let model = get("ai.model");
+    // R5：把**可选的独立视觉模型**也同步给球。
+    //   为什么必须同步：球现在的「关联知识点」要读**用户粘贴的截图**，
+    //   而主模型（如 deepseek-chat）看不了图 —— 球侧若拿不到视觉模型配置，
+    //   截图这条路在球里就是断的（只能报"当前模型不支持图片输入"）。
+    let vision_base = get("ai.vision_base_url");
+    let vision_key = keycrypt::decrypt(&get("ai.vision_api_key"));
+    let vision_model = get("ai.vision_model");
+    let image_mode = get("ai.image_mode");
     if base.is_empty() && key.is_empty() && model.is_empty() {
         return None;
     }
@@ -371,6 +387,10 @@ fn ai_config_of(conn: &rusqlite::Connection) -> Option<serde_json::Value> {
         "baseURL": base,
         "apiKey": key,
         "model": model,
+        "visionBaseURL": vision_base,
+        "visionApiKey": vision_key,
+        "visionModel": vision_model,
+        "imageMode": image_mode,
     }))
 }
 
@@ -548,6 +568,47 @@ pub fn ball_quit() -> Result<(), String> {
     send_ctrl("quit", serde_json::Map::new(), false, None)
 }
 
+/// R7：把**主窗口当前正在看的课程**同步给悬浮球（球面板据此显示范围，桥接据此检索）。
+///
+/// 为什么需要它：球的检索范围原先只认 `settings.ball.course_id`（球自己的下拉），
+/// 而球的下拉默认是「不限定课程」—— 于是用户在《数据库系统》里划词点「关联知识点」，
+/// 实际是**全库检索**，与按钮提示「先在这门课的材料 / 先验知识 / 知识点里查」不符
+/// （界面写"这门课"、实际查全库，正是 `docs/11` §一 第 2 条禁止的那种不一致）。
+///
+/// 现在的口径：**球默认跟随主窗口当前课程**；用户在球上手动改过之后，
+/// 直到主窗口再次切换课程为止都以手动为准（两处写的是同一个键，没有第二份状态）。
+///
+/// ⚠ 刻意**不 ensure_started**：同步一个检索范围不该把悬浮球拉起来（同 R6 的 `get_courses`）。
+///   球没在跑时这里只落盘 + 留一条控制文件，下次 `show` 会用新载荷覆盖它 —— 但
+///   `settings.ball.course_id` 已经写下了，球起来后拿到的就是这门课。
+#[tauri::command]
+pub fn ball_set_course(conn: State<'_, DbState>, course_id: Option<i64>) -> Result<(), String> {
+    let payload = {
+        let c = lock_conn(&conn)?;
+        set_ball_course_id(&c, course_id)?;
+        // 读回而不是直接用入参：id 非法 / 课程已被删时，这里会如实退化成「不限定课程」，
+        // 保证**下发给球的范围与落盘的范围永远一致**（不允许"库里是 A、下发是 B"）。
+        ball_course_ctrl_payload(&c)
+    };
+    write_ctrl_payload(&payload)
+}
+
+/// 组装「同步课程范围」要下发给球的控制载荷（`context` + `courses` / `courseId` / `courseName` + `ts`）。
+///
+/// 单独抽成函数是为了能被单测覆盖：这里有两个字段各对应**一次真实踩坑**——
+///   · `ts` **必填**：球的轮询只在 `msg.ts > lastCmdTs` 时才处理，漏掉它整条命令会被静默忽略
+///     （表现为"主程序说同步了、球毫无反应"，最难查的一类缺陷）；
+///   · `cmd` 必须取中性值 `context`：球侧只按"载荷里有没有 `courses` / `courseId`"同步、
+///     不认这个值，但写成 `show` / `prefill` 会**误触发球的开面板行为**。
+fn ball_course_ctrl_payload(
+    conn: &rusqlite::Connection,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut payload = ball_context_of(conn);
+    payload.insert("cmd".into(), serde_json::json!("context"));
+    payload.insert("ts".into(), serde_json::json!(now_ms()));
+    payload
+}
+
 // ---------------------------------------------------------------------------
 // 悬浮球 → 春晓 桥接：轮询共享文件
 // ---------------------------------------------------------------------------
@@ -563,7 +624,7 @@ const KEYWORD_MAX: usize = 30;
 ///
 /// 策略：按中英文标点/空白切段，优先取第一个 4–30 字的片段；
 /// 没有合适片段就退而取第一个 2–30 字的片段；整段无标点且过长则截取开头一个窗口。
-fn pick_keyword(text: &str) -> String {
+pub fn pick_keyword(text: &str) -> String {
     const MIN_GOOD: usize = 4;
     const MIN_ANY: usize = 2;
 
@@ -691,6 +752,136 @@ fn answer_material_search(app: &AppHandle, text: &str, course_id: Option<i64>) {
     }
 }
 
+/// 「关联」第一步（球面板的「关联知识点」按钮）→ 主程序本地检索**三类** → 结果写回 `to-ball.json`。
+///
+/// 与 `answer_material_search` 的区别：那一个只查材料（旧「材料」按钮），
+/// 这一个把**材料片段 / 先验知识 / 知识点**一起查出来（契约 §三）。两者**都不写库**。
+///
+/// 回传 `{ts, cmd:"relate_result", kw, courseId, materials, priors, kps, note?}`；
+/// `materials` 的字段名沿用 `material_result` 已冻结的 `material / page / snippet`，
+/// 球侧同一段渲染代码可以直接复用。
+///
+/// 与 `answer_material_search` 一样：取锁失败 / 检索失败都不 panic，回一条带 `note` 的结果，
+/// 轮询线程继续跑。
+fn answer_relate_search(app: &AppHandle, text: &str, course_id: Option<i64>) {
+    let kw = pick_keyword(text);
+
+    let outcome: Result<serde_json::Value, String> = if kw.is_empty() {
+        Ok(serde_json::json!({ "kw": "", "materials": [], "priors": [], "kps": [] }))
+    } else {
+        match app.try_state::<DbState>() {
+            Some(state) => match state.0.lock() {
+                Ok(conn) => crate::db::knowledge_match(&conn, course_id, &kw, Some(8)),
+                Err(_) => Err("数据库连接锁被污染，请重启春晓。".to_string()),
+            },
+            None => Err("数据库尚未就绪，请稍后重试。".to_string()),
+        }
+    };
+
+    let (found, note) = match outcome {
+        Ok(v) => {
+            // 三类**全空**才算"没查到"：只查材料会漏掉"知识点早就建过"这种情况
+            let all_empty = ["materials", "priors", "kps"].iter().all(|k| {
+                v.get(*k)
+                    .and_then(|a| a.as_array())
+                    .map(|a| a.is_empty())
+                    .unwrap_or(true)
+            });
+            let note = if all_empty {
+                Some(if kw.is_empty() {
+                    "选中的文字为空，没有可检索的关键词。".to_string()
+                } else if course_id.is_some() {
+                    "没在这门课的材料、先验知识与知识点里找到相关内容；可把面板的课程改成「不限定课程」再试，或先导入材料。".to_string()
+                } else {
+                    "没有在你的材料、先验知识与知识点里找到相关内容，可先在「课程」页导入材料或建知识骨架。".to_string()
+                })
+            } else {
+                None
+            };
+            (v, note)
+        }
+        Err(e) => {
+            eprintln!("[ball] 关联检索失败：{e}");
+            (
+                serde_json::json!({ "kw": kw, "materials": [], "priors": [], "kps": [] }),
+                Some(format!("检索失败：{e}")),
+            )
+        }
+    };
+
+    let mut payload = serde_json::Map::new();
+    payload.insert("ts".into(), serde_json::json!(now_ms()));
+    payload.insert("cmd".into(), serde_json::json!("relate_result"));
+    payload.insert("courseId".into(), serde_json::json!(course_id));
+    if let Some(obj) = found.as_object() {
+        for (k, v) in obj {
+            payload.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(n) = note {
+        payload.insert("note".into(), serde_json::json!(n));
+    }
+    if let Err(e) = write_ctrl_payload(&payload) {
+        eprintln!("[ball] 回传关联检索结果失败：{e}");
+    }
+}
+
+/// 「加入本课知识点」（球面板）→ 主程序**整批事务**写入 `course_prior` → 结果写回 `to-ball.json`。
+///
+/// 三条红线（契约 §3.3）：
+///   1. `course_id` **必填**：先验知识必须归属到某门课程（`course_prior.course_id` 是 NOT NULL）。
+///      「不限定课程」是一个**检索范围**概念，不是一个可以入库的归属 —— 缺课程一律拒收，
+///      并给可读中文错误（**不**像 `ball_append_qa` 那样静默退化：那条链路丢了就没有第二次机会，
+///      这条链路是用户主动点的，必须让他知道为什么没写进去）；
+///   2. `source` 写死 `球抓取`、`verified = 0`、`confidence` 不填 ——
+///      AI 抽出来的候选**只有用户核对过才算数**（与 `prior_add` / `prior_add_tree` 同一红线）；
+///   3. 整批同一事务：任一项非法就**全部回滚**，错误里指出是第几项 ——
+///      校验直接复用 `prior_add_tree`，不另写一份（两份校验迟早会漂移）。
+fn apply_relate_save(app: &AppHandle, msg: &BridgeMsg) -> Result<Vec<i64>, String> {
+    let (cid, items) = parse_relate_save(msg)?;
+
+    match app.try_state::<DbState>() {
+        Some(state) => match state.0.lock() {
+            Ok(conn) => {
+                // 显式查课程存在性：外键报错的中文可读性远不如这一句
+                let exists: bool = conn
+                    .query_row("SELECT 1 FROM courses WHERE id = ?1", [cid], |_| Ok(()))
+                    .is_ok();
+                if !exists {
+                    return Err(format!("课程不存在（id={cid}），无法把知识点加入这门课。"));
+                }
+                crate::db::prior_add_tree(
+                    &conn,
+                    cid,
+                    &items,
+                    "球抓取",
+                    msg.source_ref.as_deref(),
+                    None,
+                )
+            }
+            Err(_) => Err("数据库连接锁被污染，请重启春晓。".to_string()),
+        },
+        None => Err("数据库尚未就绪，请稍后重试。".to_string()),
+    }
+}
+
+/// `relate_save` 的**载荷校验**，抽成纯函数便于单测把口径钉死（不碰库、不碰 AppHandle）。
+///
+/// 两条硬口径：
+///   1. `course_id` 必填 —— 先验知识必须归属到某门课程（`course_prior.course_id` 是 NOT NULL）。
+///      「不限定课程」是**检索范围**，不是可以入库的归属；
+///   2. `items` 非空 —— 空提交没有意义，报错比"静默成功、什么都没写"更诚实。
+fn parse_relate_save(msg: &BridgeMsg) -> Result<(i64, Vec<serde_json::Value>), String> {
+    let cid = msg
+        .course_id
+        .ok_or_else(|| "请先在面板上选一门课程：知识点必须归属到某门课。".to_string())?;
+    let items = msg.items.clone().unwrap_or_default();
+    if items.is_empty() {
+        return Err("没有要加入的知识点（候选为空）。".to_string());
+    }
+    Ok((cid, items))
+}
+
 /// 启动桥接轮询线程（每 1.5s 检查一次）
 pub fn start_bridge_poller(app: AppHandle) {
     let poll_file = bridge_file();
@@ -740,6 +931,74 @@ pub fn start_bridge_poller(app: AppHandle) {
                     Err(_) => eprintln!("[ball] 数据库连接锁被污染，悬浮球课程选择未保存"),
                 },
                 None => eprintln!("[ball] 数据库尚未就绪，悬浮球课程选择未保存"),
+            }
+            let _ = fs::remove_file(&poll_file);
+            continue;
+        }
+
+        // R5：「关联」的两步 —— **查（relate_search）不写库**，写（relate_save）整批事务。
+        //   与 material_search 同一形状：结果经 to-ball.json 回传，**不 emit ball-push**
+        //   （球要的是检索/入库结果，不是要插进对话框的划词文本）。
+        if msg.action == "relate_search" {
+            answer_relate_search(&app, &msg.text, msg.course_id);
+            let _ = fs::remove_file(&poll_file);
+            continue;
+        }
+
+        if msg.action == "relate_save" {
+            let result = apply_relate_save(&app, &msg);
+            let mut payload = serde_json::Map::new();
+            payload.insert("ts".into(), serde_json::json!(now_ms()));
+            payload.insert("cmd".into(), serde_json::json!("relate_saved"));
+            match result {
+                Ok(ids) => {
+                    payload.insert("ok".into(), serde_json::json!(true));
+                    payload.insert("count".into(), serde_json::json!(ids.len()));
+                    payload.insert("ids".into(), serde_json::json!(ids));
+                }
+                Err(e) => {
+                    // 失败也要**如实回传原文**：球面板要把它原样显示给用户，
+                    // 不能只显示"失败了"（那样用户不知道是没选课程还是第 3 项超长）
+                    payload.insert("ok".into(), serde_json::json!(false));
+                    payload.insert("count".into(), serde_json::json!(0));
+                    payload.insert("ids".into(), serde_json::json!(Vec::<i64>::new()));
+                    payload.insert("error".into(), serde_json::json!(e));
+                }
+            }
+            if let Err(e) = write_ctrl_payload(&payload) {
+                eprintln!("[ball] 回传知识点入库结果失败：{e}");
+            }
+            let _ = fs::remove_file(&poll_file);
+            continue;
+        }
+
+        // R5.2：球**主动要**课程列表。
+        //
+        // 0.7.1 的缺陷：课程列表只在主程序**主动 push**（`ball_show` / `ball_prefill`）时才到球里，
+        // 而用户**点球或按热键**打开面板走的是 `ball:click` → `togglePanel`，**没有任何推送** ——
+        // 于是球面板的课程下拉里一门课都没有（用户实测："选择课程时没有任何课程"）。
+        // 修法：球每次打开面板/点开下拉时写一条 `get_courses`，主程序用同一条桥接把上下文回给它。
+        //   注意用 `write_ctrl_payload`（**不 ensure_started**）：填一个下拉不该把整个主程序拉起来。
+        if msg.action == "get_courses" {
+            let mut payload = match app.try_state::<DbState>() {
+                Some(state) => match state.0.lock() {
+                    Ok(conn) => ball_context_of(&conn),
+                    Err(_) => {
+                        eprintln!("[ball] 数据库连接锁被污染，本次不给球下发课程列表");
+                        serde_json::Map::new()
+                    }
+                },
+                None => {
+                    eprintln!("[ball] 数据库尚未就绪，本次不给球下发课程列表");
+                    serde_json::Map::new()
+                }
+            };
+            payload.insert("ts".into(), serde_json::json!(now_ms()));
+            // `cmd` 用 `context`：球侧轮询只按"载荷里有没有 courses/courseId"同步，
+            // 不依赖这个值；取个中性的名字以免撞上其它分支。
+            payload.insert("cmd".into(), serde_json::json!("context"));
+            if let Err(e) = write_ctrl_payload(&payload) {
+                eprintln!("[ball] 回传课程列表失败：{e}");
             }
             let _ = fs::remove_file(&poll_file);
             continue;
@@ -993,12 +1252,43 @@ mod tests {
         assert!(ctx2["courseName"].is_null());
     }
 
+    /// R7：`ball_set_course`（主窗口当前课程 → 球）下发给球的载荷形状。
+    ///
+    /// 不碰文件系统，只验装配 —— 但这里正是两个字段各踩过一次坑的地方：
+    ///   · 缺 `ts`：球的轮询只在 `msg.ts > lastCmdTs` 时处理，整条命令会被**静默忽略**；
+    ///   · `cmd` 用 `show` / `prefill`：会**误触发球的开面板行为**（用户没点也会弹面板）。
+    #[test]
+    fn ball_course_ctrl_payload_carries_context_cmd_and_fresh_ts() {
+        let conn = ball_ctx_db();
+        conn.execute(
+            "INSERT INTO courses(id, name, archived, created_at) VALUES (1, '数据结构', 0, '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        set_ball_course_id(&conn, Some(1)).unwrap();
+
+        let p = ball_course_ctrl_payload(&conn);
+        assert_eq!(p["cmd"], "context");
+        assert!(
+            p["ts"].as_i64().is_some_and(|t| t > 0),
+            "ts 必须是正的毫秒时间戳（球按它做单调递增判断，缺了整条命令被丢弃）"
+        );
+        assert_eq!(p["courseId"], 1);
+        assert_eq!(p["courseName"], "数据结构");
+        assert_eq!(p["courses"][0]["id"], 1);
+
+        // 主窗口在「全部课程」时同步 null：必须如实下发 null（而不是丢掉这个键），
+        // 否则球会继续用上一次的课程检索 —— 那正是"界面写全部课程、球查某门课"的新不一致。
+        set_ball_course_id(&conn, None).unwrap();
+        let p2 = ball_course_ctrl_payload(&conn);
+        assert!(p2.contains_key("courseId") && p2["courseId"].is_null());
+    }
+
     /// `set_course` 不带 `text`：若 `text` 仍为必填，整条消息会**反序列化失败并被静默丢弃**
     /// —— 那是最难查的一类缺陷（球说"已切换"，主程序毫无反应）。
     /// 顺带确认**旧版球的载荷**（无任何新字段）照样能解析。
     #[test]
-    fn bridge_msg_tolerates_set_course_without_text_and_legacy_payloads() {
-        let m: BridgeMsg =
+    fn bridge_msg_tolerates_set_course_without_text_and_legacy_payloads() {        let m: BridgeMsg =
             serde_json::from_str(r#"{"ts":1,"action":"set_course","course_id":3}"#).unwrap();
         assert_eq!(m.action, "set_course");
         assert_eq!(m.text, "");
@@ -1018,5 +1308,77 @@ mod tests {
         .unwrap();
         assert_eq!(ask.answer.as_deref(), Some("先求导"));
         assert_eq!(ask.images.as_ref().unwrap().len(), 1);
+    }
+
+    /// R5：`relate_save` 的载荷校验（纯函数，不碰库也不碰 AppHandle）。
+    ///
+    /// 这两条是**红线**，不是风格问题：
+    ///   · 缺课程 → 拒收：先验知识必须归属到某门课（`course_prior.course_id` 是 NOT NULL），
+    ///     「不限定课程」只是检索范围，不是能入库的归属；
+    ///   · 空 items → 拒收：静默"成功"什么都没写，比报错更难查。
+    #[test]
+    fn relate_save_payload_requires_course_and_non_empty_items() {
+        // 缺 course_id（含显式 null）→ 拒收，且错误可读
+        let m: BridgeMsg = serde_json::from_str(
+            r#"{"ts":1,"action":"relate_save","items":[{"topic":"红黑树"}]}"#,
+        )
+        .unwrap();
+        let e = parse_relate_save(&m).unwrap_err();
+        assert!(e.contains("选一门课程"), "错误应提示选课程，实际：{e}");
+
+        let null_course: BridgeMsg = serde_json::from_str(
+            r#"{"ts":2,"action":"relate_save","course_id":null,"items":[{"topic":"红黑树"}]}"#,
+        )
+        .unwrap();
+        assert!(parse_relate_save(&null_course).is_err());
+
+        // 有课程但没有候选 → 拒收
+        let no_items: BridgeMsg =
+            serde_json::from_str(r#"{"ts":3,"action":"relate_save","course_id":1}"#).unwrap();
+        assert!(parse_relate_save(&no_items).is_err(), "空候选必须拒收");
+        let empty_items: BridgeMsg =
+            serde_json::from_str(r#"{"ts":4,"action":"relate_save","course_id":1,"items":[]}"#)
+                .unwrap();
+        assert!(parse_relate_save(&empty_items).is_err());
+
+        // 正常形状：透传 course_id 与 items 原样（不做任何字段改名）
+        let ok: BridgeMsg = serde_json::from_str(
+            r#"{"ts":5,"action":"relate_save","course_id":7,"source_ref":"教材 P32",
+                "items":[{"topic":"AVL 树","summary":"自平衡二叉搜索树","parent_topic":"平衡树"}]}"#,
+        )
+        .unwrap();
+        let (cid, items) = parse_relate_save(&ok).unwrap();
+        assert_eq!(cid, 7);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["topic"], "AVL 树");
+        assert_eq!(items[0]["parent_topic"], "平衡树");
+    }
+
+    /// R5：`ai_config_of` 必须把**独立视觉模型**也同步给球。
+    ///
+    /// 不传的话，球里粘贴截图这条链路是断的（默认主模型 deepseek-chat 看不了图），
+    /// 而用户在主程序里明明配好了视觉模型 —— 那种"主窗口能读、球读不了"最难解释。
+    #[test]
+    fn ai_config_of_passes_vision_settings_to_ball() {
+        let conn = settings_db();
+        put(&conn, "ai.base_url", "https://api.deepseek.com");
+        put(&conn, "ai.model", "deepseek-chat");
+        put(&conn, "ai.vision_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+        put(&conn, "ai.vision_model", "qwen-vl-max");
+        put(&conn, "ai.image_mode", "text");
+
+        let cfg = ai_config_of(&conn).expect("有主配置时应返回 Some");
+        assert_eq!(cfg["visionBaseURL"], "https://dashscope.aliyuncs.com/compatible-mode/v1");
+        assert_eq!(cfg["visionModel"], "qwen-vl-max");
+        assert_eq!(cfg["imageMode"], "text");
+        // 字段名是契约：球侧 ai.js 按这些名字读
+        assert!(cfg.get("visionApiKey").is_some());
+
+        // 没配视觉模型时字段仍在（空串），不会让球侧 `cfg.ai.visionModel` 变成 undefined
+        let conn2 = settings_db();
+        put(&conn2, "ai.base_url", "https://api.deepseek.com");
+        let cfg2 = ai_config_of(&conn2).unwrap();
+        assert_eq!(cfg2["visionModel"], "");
+        assert_eq!(cfg2["imageMode"], "");
     }
 }

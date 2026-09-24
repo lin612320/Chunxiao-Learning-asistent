@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-let currentSkin = 'aurora';
+let currentSkin = 'whale';
 
 function applySkinId(id) {
   currentSkin = id;
@@ -23,7 +23,29 @@ function render(list, selectedId) {
     } else {
       ball.style.background = `linear-gradient(135deg, ${s.from}, ${s.to})`;
     }
-    ball.textContent = s.face || '';
+    if (s.art) {
+      // R11：图片形象（云鲸女仆）—— 预览直接放这张图
+      const img = document.createElement('img');
+      img.className = 'whale-preview';
+      img.src = s.art;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      ball.appendChild(img);
+    } else if (s.whale && window.CX_WHALE && window.CX_WHALE.path) {
+      // R10：鲸鱼娘 —— 预览也画真鲸鱼（不然这张卡片只有一个空的蓝球）
+      const NS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', window.CX_WHALE.viewBox);
+      svg.setAttribute('class', 'whale-preview');
+      svg.setAttribute('aria-hidden', 'true');
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', window.CX_WHALE.path);
+      path.setAttribute('fill', '#fff');
+      svg.appendChild(path);
+      ball.appendChild(svg);
+    } else {
+      ball.textContent = s.face || '';
+    }
     card.appendChild(ball);
 
     const name = document.createElement('div');

@@ -238,6 +238,16 @@ fn prior_verify(conn: State<'_, DbState>, id: i64, verified: bool) -> Result<(),
     db::prior_verify(&c, id, verified)
 }
 
+/// R9：一键核对 —— 把这门课**所有未核对**的先验知识一次标为已核对，返回受影响条数。
+///
+/// 用户原话就是「核对添加一键核对功能」：原来只能一条一条点「标记已核对」，
+/// 一门课生成出来 16 条就得点 16 次（而且每点一次一次 IPC）。
+#[tauri::command]
+fn prior_verify_all(conn: State<'_, DbState>, course_id: i64) -> Result<i64, String> {
+    let c = conn_of(&conn)?;
+    db::prior_verify_all(&c, course_id)
+}
+
 #[tauri::command]
 fn prior_delete(conn: State<'_, DbState>, id: i64) -> Result<(), String> {
     let c = conn_of(&conn)?;
@@ -443,14 +453,40 @@ fn material_search(
 // 会话（多会话，持久化到 SQLite，重启不丢）
 // ---------------------------------------------------------------------------
 
-/// 会话列表；`course_id` 不传 = 全部会话。无结果时返回 `[]`。
+/// 会话列表；`course_id` 不传 = 全部课程，`origin` 不传 = **全部来源**。
+///
+/// R5：新增可选参数 `origin`（`app` = 主窗口 / `ball` = 悬浮球）。不传时行为与以前
+/// **逐字一致**（向后兼容）；传了非法值由 `db::chat_sessions_list` 报可读中文错误 ——
+/// 不静默降级成"全部"，否则界面写「只看悬浮球」而实际列出一堆主窗口会话。
+/// 无结果时返回 `[]`。
 #[tauri::command]
 fn chat_sessions_list(
     conn: State<'_, DbState>,
     course_id: Option<i64>,
+    origin: Option<String>,
 ) -> Result<Vec<Value>, String> {
     let c = conn_of(&conn)?;
-    db::chat_sessions_list(&c, course_id)
+    db::chat_sessions_list(&c, course_id, origin.as_deref())
+}
+
+/// 「关联」的检索段（R5）：一次查**三类** —— 材料片段 / 先验知识 / 知识点。
+///
+/// `courseId` 省略 / null = **不限定课程**（三类都不按课程过滤）。
+/// 关键词从 `text` 里用与球侧同一套规则抽取（`ball::pick_keyword`），
+/// **不**让前端各写一份分词 —— 球与主窗口必须看到同一个 `kw`，否则两边"同一段内容"
+/// 会查出不同结果，而用户无从判断谁对。
+///
+/// 本命令**只读**，不写任何表；写入走 `prior_add_tree`（主窗口）/ `relate_save`（球）。
+#[tauri::command]
+fn knowledge_match(
+    conn: State<'_, DbState>,
+    course_id: Option<i64>,
+    text: String,
+    limit: Option<i64>,
+) -> Result<Value, String> {
+    let c = conn_of(&conn)?;
+    let kw = ball::pick_keyword(&text);
+    db::knowledge_match(&c, course_id, &kw, limit)
 }
 
 #[tauri::command]
@@ -1214,6 +1250,8 @@ pub fn run() {
             prior_add,
             prior_update,
             prior_verify,
+            // R9：一键核对（整门课的未核对条目，1 次 IPC、1 个事务）
+            prior_verify_all,
             prior_delete,
             // R1：批量写入先验知识树（顶层 + 子项，1 次 IPC、整批一个事务）
             prior_add_tree,
@@ -1226,6 +1264,8 @@ pub fn run() {
             // M1：字节导入 + 带出处检索
             extract_material_b64,
             material_search,
+            // R5：关联检索（材料 / 先验知识 / 知识点 三类一次查回，只读）
+            knowledge_match,
             // 会话
             chat_sessions_list,
             chat_session_create,
@@ -1281,6 +1321,8 @@ pub fn run() {
             ball::ball_hide,
             ball::ball_prefill,
             ball::ball_quit,
+            // R7：主窗口当前课程 → 球（球默认跟随主窗口，避免"界面写这门课、实际查全库"）
+            ball::ball_set_course,
             // 文件打开 / 定位
             open_file,
             reveal_in_folder,

@@ -90,7 +90,7 @@ export interface UseProfileResult {
   addDeclaredGap: (name: string) => Promise<boolean>;
 }
 
-export function useProfile(): UseProfileResult {
+export function useProfile(lockedCourseId: number | null = null): UseProfileResult {
   const { courses, loading: coursesLoading } = useCourses();
 
   const [courseId, setCourseId] = useState<number | null>(null);
@@ -101,12 +101,25 @@ export function useProfile(): UseProfileResult {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  /**
+   * R9：**URL 的 `?course=N` 优先**（调用方传进来的 `lockedCourseId`）。
+   *
+   * 为什么：侧栏/顶栏切换课程**只改 URL**，而本 hook 原先只认自己的 state，
+   * 于是"顶栏写着 B 课、下面的掌握度还是 A 课的"——用户实测反馈的正是这个。
+   * 口径与笔记页一致：有课程上下文就锁定它，没有才允许页内自选。
+   */
+  useEffect(() => {
+    if (lockedCourseId != null) setCourseId(lockedCourseId);
+  }, [lockedCourseId]);
+
   // 课程加载完后默认选第一门未归档的课程（没有未归档的就选第一门）
   useEffect(() => {
+    // 锁定态：不允许被"兜底第一门"覆盖（否则切到 B 课又被抢回 A 课）
+    if (lockedCourseId != null) return;
     if (courseId != null || courses.length === 0) return;
     const first = courses.find((c) => c.archived !== 1) ?? courses[0];
     setCourseId(first.id);
-  }, [courses, courseId]);
+  }, [courses, courseId, lockedCourseId]);
 
   const refresh = useCallback(async () => {
     if (courseId == null) {

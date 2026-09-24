@@ -27,11 +27,10 @@
 // 只新建本文件与 `Questions.css`，不改任何既有文件；图表/进度全部纯 CSS/DOM 手写，无图表库。
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useCourses } from "../hooks/useCourses";
 import { useSettings } from "../hooks/useSettings";
 import {
-  ATTEMPTS_LIST_LIMIT,
   QUESTIONS_LIST_LIMIT,
   loadPriorList,
   loadQuestionFull,
@@ -43,6 +42,8 @@ import {
   useQuestionList,
 } from "../hooks/useQuestions";
 import { materialSearch } from "../lib/materials";
+// R9：课程上下文口径与笔记页/对话页**同源**（`?course=N` 优先，见 lib/courseScope.ts）
+import { parseCourseParam } from "../lib/courseScope";
 import { isTauri } from "../lib/tauri";
 import {
   QUESTIONS_MAX_COUNT,
@@ -214,8 +215,12 @@ export default function Questions() {
   const { courses, loading: coursesLoading } = useCourses();
   const { s, hasKey } = useSettings();
   const [sp] = useSearchParams();
+  const { search } = useLocation();
 
   // —— 课程（页面级唯一选择：知识点 / 题目 / 练习 / 错题本都按它取数）——
+  // R9：**`?course=N` 优先**（与笔记页同一套）：侧栏/顶栏切课程时它们只改 URL，
+  //   本页若只认自己的 state，就会出现"顶栏写着 B 课、题目还是 A 课的"（用户实测反馈）。
+  const urlCourseId = parseCourseParam(search);
   const [courseId, setCourseId] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("kp");
   const [notice, setNotice] = useState<string | null>(null);
@@ -223,10 +228,16 @@ export default function Questions() {
   const preview = !isTauri();
 
   useEffect(() => {
+    // URL 带了课程上下文 → 本页课程跟随它（这就是"在顶部切课程，下面的功能也跟着切"）
+    if (urlCourseId != null) {
+      setCourseId(urlCourseId);
+      return;
+    }
+    // 没有 URL 上下文：保持页面自己的选择；一次都没选过才兜底到第一门未归档课程
     if (courseId != null || courses.length === 0) return;
     const active = courses.find((c) => !c.archived) ?? courses[0];
     setCourseId(active.id);
-  }, [courses, courseId]);
+  }, [courses, courseId, urlCourseId]);
 
   // —— 知识点 ——
   const kp = useKnowledgePoints(courseId);
@@ -361,8 +372,8 @@ export default function Questions() {
     if (!r) return; // 失败原因已经在 kp.error 里如实展示
     setNotice(
       r.created > 0
-        ? `已从先验知识同步知识点：本次新建 ${r.created} 个，当前共 ${r.total} 个。`
-        : `同步完成：本次新建 0 个（先验知识里的条目都已经同步过，这个同步是幂等的），当前共 ${r.total} 个知识点。`,
+        ? `已生成知识点清单：新增 ${r.created} 个，现在共 ${r.total} 个。`
+        : `这次没有新增，现在共 ${r.total} 个知识点。`,
     );
   }
 
@@ -396,7 +407,7 @@ export default function Questions() {
       return;
     }
     if (selectedKps.length === 0) {
-      setGenErr("请在「知识点」里至少勾选一个知识点（出题提示词要求 kp_name 逐字对应知识点名称）。");
+      setGenErr("请先勾选至少一个知识点 —— 出题时知识点名称要完全对得上，得先告诉春晓给哪些知识点出题。");
       return;
     }
 
@@ -858,22 +869,26 @@ export default function Questions() {
       {/* ---------------- 工具条：课程 + 从先验知识同步知识点 ---------------- */}
       <section className="card qs-toolbar">
         <div className="qs-toolbar-left">
-          <label className="qs-field">
-            <span className="qs-field-label">课程</span>
-            <select
-              value={courseId ?? ""}
-              disabled={coursesLoading || courses.length === 0}
-              onChange={(e) => setCourseId(e.target.value ? Number(e.target.value) : null)}
-            >
-              {courses.length === 0 ? <option value="">（本机还没有课程）</option> : null}
-              {courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.archived === 1 ? "（已归档）" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+          {/* R9：有课程上下文时**不显示课程选择器**（与笔记页同口径）——
+              当前范围由侧栏选择器 + 顶栏课程胶囊负责，页内再放一个就是三处重复。 */}
+          {urlCourseId == null ? (
+            <label className="qs-field">
+              <span className="qs-field-label">课程</span>
+              <select
+                value={courseId ?? ""}
+                disabled={coursesLoading || courses.length === 0}
+                onChange={(e) => setCourseId(e.target.value ? Number(e.target.value) : null)}
+              >
+                {courses.length === 0 ? <option value="">（本机还没有课程）</option> : null}
+                {courses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {c.archived === 1 ? "（已归档）" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {courseName ? <span className="qs-toolbar-note">当前课程：{courseName}</span> : null}
         </div>
         <div className="qs-toolbar-right">
@@ -881,10 +896,9 @@ export default function Questions() {
             type="button"
             className="primary small"
             disabled={courseId == null || syncBusy}
-            title="按这门课的先验知识树派生知识点（幂等：已同步过的不重复建）"
             onClick={() => void handleSync()}
           >
-            {syncBusy ? "同步中…" : "从先验知识同步知识点"}
+            {syncBusy ? "生成中…" : "生成知识点清单"}
           </button>
           <button
             type="button"
@@ -927,19 +941,14 @@ export default function Questions() {
         <section className="card qs-block">
           <div className="section-head">
             <h3>知识点 · 本机统计</h3>
-            <span className="qs-section-note">只统计你在这台电脑上的作答</span>
           </div>
 
           {courseId == null ? (
-            <p className="empty">暂无课程：请先到「课程」页新建一门课程，题库按课程组织。</p>
+            <p className="empty">暂无课程。</p>
           ) : kp.loading ? (
             <p className="loading-line">正在读取本机知识点…</p>
           ) : kp.list.length === 0 ? (
-            <p className="empty">
-              暂无记录：这门课程还没有知识点。点上面的「从先验知识同步知识点」按先验知识树派生，
-              同步是幂等的（已存在的不重复建），也可以直接去「生成题目」——不过出题要求知识点名称逐字对应，
-              所以先同步更稳。
-            </p>
+            <p className="empty">这门课还没有知识点。</p>
           ) : (
             <>
               <div className="qs-kp-bar">
@@ -995,17 +1004,11 @@ export default function Questions() {
             <h3>生成题目（AI 生成 · 必须先预览再保存）</h3>
             <span className="src-badge src-ai">AI 生成 · 待核对</span>
           </div>
-          <p className="muted">
-            出题输入 = 课程名 + 选中知识点的<strong>先验知识摘要</strong> + 这门课材料里检索到的
-            <strong>材料段落</strong>；模型被要求只输出严格的结构化题目。生成结果<strong>不会自动保存</strong>：
-            你可以勾选、改题干 / 选项 / 答案 / 解析，点「确认保存」才写入本机题库（来源标为「AI 生成 · 待核对」）。
-          </p>
-
           <div className="qs-gen-bar">
             <span className="qs-gen-label">已选知识点（{selectedKps.length}）</span>
             <div className="qs-gen-kps">
               {kp.list.length === 0 ? (
-                <span className="muted">这门课程还没有知识点：先到「知识点与统计」里点「从先验知识同步知识点」。</span>
+                <span className="muted">这门课还没有知识点。</span>
               ) : (
                 kp.list.map((k) => {
                   const checked = genKpIds.includes(k.id);
@@ -1059,11 +1062,6 @@ export default function Questions() {
               )}
             </button>
 
-            <span className="muted qs-gen-tip">
-              {hasKey
-                ? "只会发送知识点名称与摘要、材料段落；不会发送材料全文，也不会自动保存。"
-                : "未配置模型 API Key，暂时无法生成（不会用模板假造题目冒充 AI 生成）。"}
-            </span>
             {!hasKey ? (
               <Link to="/settings" className="ghost-btn" style={{ textDecoration: "none" }}>
                 去「数据设置」配置 →
@@ -1081,7 +1079,7 @@ export default function Questions() {
 
           {genRaw ? (
             <details className="qs-raw">
-              <summary>查看模型原始输出（未核对；解析失败时用来排障）</summary>
+              <summary>查看模型的原始输出（还没核对；出问题的时候用来看）</summary>
               <pre>{genRaw}</pre>
             </details>
           ) : null}
@@ -1229,9 +1227,6 @@ export default function Questions() {
         <section className="card qs-block">
           <div className="section-head">
             <h3>题目列表 · 本机题库</h3>
-            <span className="qs-section-note">
-              筛选在读取到的这一批里做（一次最多取 {QUESTIONS_LIST_LIMIT} 道），所以界面会如实标出实际读到多少道。
-            </span>
           </div>
 
           <div className="qs-filter-bar">
@@ -1307,14 +1302,11 @@ export default function Questions() {
           ) : null}
 
           {courseId == null ? (
-            <p className="empty">暂无课程：题库按课程组织，请先在「课程」页新建一门课程。</p>
+            <p className="empty">暂无课程。</p>
           ) : list.loading ? (
             <p className="loading-line">正在读取本机题库…</p>
           ) : list.rows.length === 0 ? (
-            <p className="empty">
-              暂无记录：当前条件下没有题目。可以换筛选条件，或到「生成题目」生成后确认保存
-              （AI 生成的题不会自动进库）。
-            </p>
+            <p className="empty">暂无记录：当前条件下没有题目。</p>
           ) : (
             <ul className="qs-q-list">
               {list.rows.map((q) => {
@@ -1457,9 +1449,6 @@ export default function Questions() {
         <section className="card qs-block">
           <div className="section-head">
             <h3>练习 · 逐题作答</h3>
-            <span className="qs-section-note">
-              取题顺序：未作答优先 → 所属知识点掌握度升序（越弱越先）→ id；这只是本机的统计排序。
-            </span>
           </div>
 
           {practiceErr ? (
@@ -1510,10 +1499,7 @@ export default function Questions() {
           </div>
 
           {!practice ? (
-            <p className="empty">
-              还没有开始练习：选好知识点与题量后点「开始练习」。客观题（选择 / 填空）在本机判分，
-              主观题（简答 / 论述）先给你参考答案，再由你自评「答上了 / 没答上」。
-            </p>
+            <p className="empty">还没有开始练习。</p>
           ) : practice.finished ? (
             <div className="qs-practice-done">
               <b>本轮练习结束</b>
@@ -1710,9 +1696,6 @@ export default function Questions() {
         <section className="card qs-block">
           <div className="section-head">
             <h3>错题本 · 本机作答记录</h3>
-            <span className="qs-section-note">
-              数据源：本机作答记录里判为「答错」或自评为「没答上」的条目（一次最多取 {ATTEMPTS_LIST_LIMIT} 条）。
-            </span>
           </div>
 
           <div className="qs-wrong-bar">
@@ -1733,14 +1716,11 @@ export default function Questions() {
           </div>
 
           {courseId == null ? (
-            <p className="empty">暂无课程：错题本按课程查看，请先选择一门课程。</p>
+            <p className="empty">暂无课程。</p>
           ) : wrong.loading ? (
             <p className="loading-line">正在读取本机错题记录…</p>
           ) : wrong.rows.length === 0 ? (
-            <p className="empty">
-              暂无记录：这门课程还没有答错的作答记录（错题本只收判为错题 / 自评没答上的条目，
-              绝不为了"有内容"而造数据）。
-            </p>
+            <p className="empty">暂无记录。</p>
           ) : (
             <ul className="qs-wrong-list">
               {wrong.rows.map((a) => (

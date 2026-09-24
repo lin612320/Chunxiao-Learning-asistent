@@ -22,11 +22,11 @@
 :root[data-theme="dark"] .notes-page {
   /* 暗色主题：改成半透明叠加，避免亮色块把字压得看不见 */
   --notes-yellow: rgba(255, 214, 102, 0.26);
-  --notes-green: rgba(79, 192, 141, 0.26);
+  --notes-green: rgba(78, 209, 126, 0.26);
   --notes-blue: rgba(96, 165, 250, 0.28);
   --notes-pink: rgba(244, 114, 182, 0.26);
   --notes-purple: rgba(167, 139, 250, 0.28);
-  --notes-ink: #e7efea;
+  --notes-ink: #f9fafb;
 }
 
 /* ---------- 表单原子：字段 + 输入 ---------- */
@@ -176,6 +176,34 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* ---------- R9：按天分组 ----------
+   自己写的与 AI 整理的混在同一组里，靠来源徽标区分（用户要的是"按天看笔记"）。 */
+.notes-day + .notes-day {
+  margin-top: 14px;
+}
+
+.notes-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.notes-day-label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.notes-day-count {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
 }
 
 .notes-item {
@@ -532,7 +560,7 @@
 
 .notes-anno-dot.color-green,
 .notes-color-btn.color-green {
-  background: #3aa87e;
+  background: #4ed17e;
 }
 
 .notes-anno-dot.color-blue,

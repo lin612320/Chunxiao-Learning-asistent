@@ -12,7 +12,8 @@
   .ball {
     width: 56px; height: 56px;
     border-radius: var(--radius, 50%);
-    background: linear-gradient(135deg, var(--from, #43e97b), var(--to, #38f9d7));
+    /* R10：默认渐变换成 DSH 品牌蓝（deepseek-450 → deepseek-500） */
+    background: linear-gradient(135deg, var(--from, #5686fe), var(--to, #4176e6));
     box-shadow: 0 6px 18px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.25);
     display: flex; align-items: center; justify-content: center;
     cursor: pointer; user-select: none;
@@ -36,6 +37,17 @@
     transition: transform .2s;
   }
 
+  /* R10/R11：形象图（云鲸女仆 / 未来的图片形象）。默认隐藏，`pet.art` 时由 ball.js 打开。 */
+  .pet {
+    position: relative; z-index: 1;
+    width: 46px; height: 46px;
+    display: none;
+    object-fit: contain;
+    object-position: center bottom;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,.28));
+    transition: transform .2s;
+  }
+
   /* 拖动动画：依据皮肤 pet.dragAnim */
   @keyframes wobble { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-14deg)} 75%{transform:rotate(14deg)} }
   @keyframes spin   { to { transform: rotate(360deg); } }
@@ -48,7 +60,7 @@
   /* 文本拖入悬停态（手动抓取模式） */
   .ball.drop-hover {
     transform: scale(1.15);
-    box-shadow: 0 0 0 3px rgba(88,166,255,.9), 0 8px 22px rgba(0,0,0,.4);
+    box-shadow: 0 0 0 3px rgba(90,167,216,.9), 0 8px 22px rgba(0,0,0,.4);
   }
   .ball.drop-hover .face::before { content: '📥'; }
   .ball.drop-hover .face { font-size: 0; }
@@ -56,7 +68,14 @@
 </style>
 </head>
 <body>
-  <div class="ball" id="ball"><span class="face" id="face">🦊</span></div>
+  <div class="ball" id="ball">
+    <span class="face" id="face">🦊</span>
+    <img class="pet" id="pet" alt="" aria-hidden="true" />
+    <svg class="whale" id="whale" viewBox="0 0 23.16 17.04" fill="none" aria-hidden="true">
+      <path d="" fill="#fff"></path>
+    </svg>
+  </div>
+  <script src="whale.js"></script>
   <script src="ball.js"></script>
 </body>
 </html>

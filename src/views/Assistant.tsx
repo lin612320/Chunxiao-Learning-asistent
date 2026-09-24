@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useChat } from "../hooks/useChat";
+import { readIncludeBall, useChat, writeIncludeBall } from "../hooks/useChat";
 import { useSettings } from "../hooks/useSettings";
 import { useCourses } from "../hooks/useCourses";
 import { ASK_MODES, type AskMode } from "../lib/ai";
 import { parseRefs } from "../data/sample";
 import { refTitle } from "../lib/materials";
+import Markdown from "../lib/markdown";
 import Highlight from "../lib/highlight";
 import { isTauri } from "../lib/tauri";
 import Mascot from "../components/Mascot";
@@ -38,6 +39,12 @@ export default function Assistant() {
 
   const { s, hasKey, visionConfig } = useSettings();
   const { courses } = useCourses();
+  /**
+   * R5：会话列表是否包含悬浮球的记录。
+   * 默认 **false**（分开显示）；开关状态存 localStorage，刷新后保持。
+   * 打开时球的会话带「球」徽标 —— 来源必须一眼可辨，不然用户分不清哪条是主窗口聊的。
+   */
+  const [includeBall, setIncludeBall] = useState<boolean>(() => readIncludeBall());
   const {
     sessions,
     currentId,
@@ -61,6 +68,7 @@ export default function Assistant() {
     courseId: urlCourseId, // ← G1/G2/G3 的修复点：把课程上下文接上数据层
     vision: visionConfig,
     imageMode: s.imageMode,
+    includeBall,
   });
 
   const [text, setText] = useState("");
@@ -130,7 +138,6 @@ export default function Assistant() {
   }
 
   const current = sessions.find((x) => x.id === currentId);
-  const modeHint = ASK_MODES.find((m) => m.key === mode)?.hint ?? "";
 
   /** 当前会话的归属（`null` = 不限定课程）；会话不在列表里时按"无"处理 */
   const ownCourseId = current?.course_id ?? null;
@@ -176,47 +183,20 @@ export default function Assistant() {
 
   return (
     <div className={"assistant-page" + (isFloat ? " float" : "")}>
-      {/* 顶部说明（紧凑模式下只留一行） */}
+      {/* R6：**删掉重复的页内标题**（顶栏已经写着「与春晓对话」）与那句口号。
+          只留两个如实的小标签 —— 省下的高度全部给消息区（用户：对话内容显示不全）。 */}
       <div className="assistant-bar">
-        <div>
-          <b>与春晓对话</b>
-          <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
-            面向课后理解与复习 · 不面向考试场景
-          </span>
-        </div>
         <div className="assistant-actions">
           {!hasKey && <span className="tag tag-warn">演示模式</span>}
           <span className="tag">数据都在这台电脑上</span>
         </div>
       </div>
 
-      {/* R1：课程上下文 + 当前会话归属（契约 §一 第 1 条：界面必须**始终可见**当前课程上下文）。
-          两个选择器只是"显示 + 显式选择"：上下文决定本页会话列表/新建会话/材料检索范围；
-          改归属是显式动作，成功后明说并跟随切换上下文。 */}
+      {/* R1/R6：会话归属。**「在聊哪门课」这个选择器已删** ——
+          课程现在由侧栏选择器 + 顶栏课程胶囊负责（同一事实来源），页内再放一个就是三处重复。
+          检索范围仍在下方输入区**始终可见**（契约 §一 第 2 条）。 */}
       <div className="chat-scope-bar">
-        <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>
-          在聊哪门课
-        </span>
-        <select
-          className="course-select"
-          value={urlCourseId != null ? String(urlCourseId) : ""}
-          disabled={sending}
-          title="选定后：这里的对话列表只看这门课，新对话会归到这门课，找材料也只在这门课里找。选「不限定课程」= 在这台电脑上的全部课程材料里找。切换只影响之后的提问，不会改动已有对话的归属。"
-          onChange={(e) => gotoCourseContext(e.target.value === "" ? null : Number(e.target.value))}
-        >
-          <option value="">{NO_COURSE_LABEL}</option>
-          {courses.map((c) => (
-            <option key={c.id} value={c.id}>
-              {courseOptionLabel(c)}
-            </option>
-          ))}
-          {/* 当前课程不在列表里（已删除 / 列表还没加载完）时补一个兜底选项：绝不让当前课程变成空选中 */}
-          {urlCourseId != null && !courses.some((c) => c.id === urlCourseId) && (
-            <option value={urlCourseId}>{courseLabel(urlCourseId, courses)}</option>
-          )}
-        </select>
-
-        {current && (
+        {current ? (
           <>
             <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>
               这个对话属于
@@ -241,13 +221,13 @@ export default function Assistant() {
               )}
             </select>
           </>
-        )}
-        {currentId != null && !current && (
+        ) : (
           <span className="muted" style={{ fontSize: 12 }}>
-            （这个对话不在当前课程里）
+            {urlCourseId == null ? "还没选课程：在左边选一门课，这里就只聊那门课" : "新对话会归到当前课程"}
           </span>
         )}
       </div>
+
 
       {/* R1：可选提示条 —— 绝不自动改变检索范围（§一 第 3 条）；只有点「切过去」才会切上下文 */}
       {hintCourse && (
@@ -298,7 +278,9 @@ export default function Assistant() {
           </span>
         ) : sessions.length === 0 ? (
           <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
-            还没有会话，直接提问会自动新建一个。
+            {includeBall
+              ? "还没有会话，直接提问会自动新建一个。"
+              : "还没有会话。悬浮球里问过的内容默认不列在这里，可点右侧「含悬浮球记录」查看。"}
           </span>
         ) : (
           sessions.map((se) => (
@@ -306,12 +288,33 @@ export default function Assistant() {
               key={se.id}
               className={"chip" + (se.id === currentId ? " chip-active" : "")}
               onClick={() => void selectSession(se.id)}
-              title={se.title}
+              title={
+                se.origin === "ball"
+                  ? `${se.title}（悬浮球里的问答，已存进同一个知识库）`
+                  : se.title
+              }
             >
+              {/* R5：球的记录带徽标 —— 来源要一眼可辨 */}
+              {se.origin === "ball" && <span className="chip-tag">球</span>}
               {se.title}
             </button>
           ))
         )}
+        <button
+          className={"chip" + (includeBall ? " chip-active" : "")}
+          title={
+            includeBall
+              ? "当前：连悬浮球里问过的内容一起列出来。点一下只看主窗口的对话。"
+              : "当前只显示主窗口的对话。点一下把悬浮球里问过的内容也列出来（同一个知识库）。"
+          }
+          onClick={() => {
+            const next = !includeBall;
+            setIncludeBall(next);
+            writeIncludeBall(next);
+          }}
+        >
+          {includeBall ? "含悬浮球记录 ✓" : "含悬浮球记录"}
+        </button>
         {currentId != null && (
           <button
             className="chip session-del"
@@ -350,10 +353,6 @@ export default function Assistant() {
             <div className="assistant-empty-title">问点什么吧</div>
             <div>
               例如：「均摊分析到底在算什么？」「把红黑树的性质讲得再浅一点」。
-              <br />
-              打开「先查课程材料再回答」后，春晓会先从你的问题里挑出关键词，到这台电脑上的课程材料里找一找，
-              把找到的段落当作参考一起交给模型；回答下面会列出参考来源，并把找到的词标黄。
-              一个都没找到时会<b>明确写明这条回答没有材料出处</b>，也会告诉你这次用了哪些词去找。
               <br />
               标着「AI 生成 · 待核对」的课程知识点，确认过再当依据用。
             </div>
@@ -394,7 +393,21 @@ export default function Assistant() {
                         ))}
                       </div>
                     ) : null}
-                    <div className="msg-bubble">{m.content}</div>
+                    {/* R7：**AI 的回答走 Markdown 渲染**（关掉旧债 T28）。
+                        此前这里是 `<div>{m.content}</div>` 纯文本，模型返回的 `#`、`-`、`**`
+                        原样显示成一堆符号（用户："ai 的返回内容做好格式渲染，不要一堆的 #"）。
+                        渲染器就是笔记页那一个（`lib/markdown.tsx`，T2），不另写一份。
+                        `terms` 用本轮检索词：与回答下方「参考来源」里标黄的词**同一份**，
+                        用户一眼能对上"答案里哪个词是从我材料里找到的"。
+                        ⚠ 用户自己发的消息**仍按纯文本渲染**（`white-space: pre-wrap`）：
+                          用户输入里的 `#` 就是 `#`，不该被当成标题——那是他的话，不是 Markdown。 */}
+                    {m.role === "assistant" ? (
+                      <div className="msg-bubble">
+                        <Markdown text={m.content} terms={refTerms} />
+                      </div>
+                    ) : (
+                      <div className="msg-bubble">{m.content}</div>
+                    )}
 
                     {/* 没找到 / 查找出错：显式标注"没有材料出处" */}
                     {m.role === "assistant" && searchFailed && (
@@ -447,12 +460,8 @@ export default function Assistant() {
               );
             })
         )}
-        {imageBusy && (
-          <div className="loading-line">
-            正在让视觉模型把图片转成文字…（这一步用的是你配的视觉模型，转完再交给主模型回答）
-          </div>
-        )}
-        {searching && <div className="loading-line">正在这台电脑上的课程材料里找…（不联网）</div>}
+        {imageBusy && <div className="loading-line">正在把图片转成文字…</div>}
+        {searching && <div className="loading-line">正在查找课程材料…（不联网）</div>}
 
         {/* 如实告诉用户这次用了哪些词、找到多少（一个都没找到也要说清为什么） */}
         {useMaterials && lastSearch && !searching && (
@@ -475,23 +484,28 @@ export default function Assistant() {
 
       {/* 输入区 */}
       <div className="assistant-input">
-        <div className="mode-chips">
-          {ASK_MODES.map((m) => (
-            <button
-              key={m.key}
-              className={"chip" + (mode === m.key ? " chip-active" : "")}
-              title={m.hint}
-              onClick={() => setMode(m.key)}
-            >
-              {m.label}
-            </button>
-          ))}
-          <span className="muted" style={{ fontSize: 12 }}>
-            {modeHint}
-          </span>
-        </div>
-        <div className="mat-toggle-row">
-          <label className="mat-toggle" title="打开后：先从你的问题里挑关键词，再到这台电脑上的课程材料里找，把找到的段落作为参考一起交给模型">
+        {/* R6：模式 + 「先查材料」+ 检索范围**合成一行**。
+            原来它们是两行、外加一句 modeHint（那句与每个 chip 的 title 重复），
+            实测把消息区挤到只剩 190px（输入区自己占 278px）—— 用户说"对话内容显示不全"就是这个。
+            ⚠ 检索范围**仍在主界面上可见**（契约 docs/11 §一 第 2 条：界面写什么就必须按什么查），
+              只是不再单独占一行。 */}
+        <div className="assistant-controls">
+          <div className="mode-chips">
+            {ASK_MODES.map((m) => (
+              <button
+                key={m.key}
+                className={"chip" + (mode === m.key ? " chip-active" : "")}
+                title={m.hint}
+                onClick={() => setMode(m.key)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <label
+            className="mat-toggle"
+            title="打开后：先从你的问题里挑关键词，再到这台电脑上的课程材料里找，把找到的段落作为参考一起交给模型"
+          >
             <input
               type="checkbox"
               checked={useMaterials}
@@ -500,11 +514,14 @@ export default function Assistant() {
             />
             <span>
               <Icon name="book" size={15} />
-              先查课程材料再回答
+              先查材料
             </span>
           </label>
-          <span className="muted mat-scope">
-            {useMaterials ? scopeText : "已关闭：这次按普通对话回答，不去找材料、也不标出处"}
+          <span
+            className="muted mat-scope"
+            title={useMaterials ? scopeText : "已关闭：这次按普通对话回答，不去找材料、也不标出处"}
+          >
+            {useMaterials ? scopeText : "未查材料"}
           </span>
         </div>
 
@@ -566,20 +583,23 @@ export default function Assistant() {
           }}
         >
           <textarea
-            rows={isFloat ? 2 : 3}
+            rows={isFloat ? 2 : 2}
             value={text}
             placeholder={
               hasKey
-                ? "输入问题；截图后可直接 Ctrl+V 粘贴图片（Enter 换行，Ctrl+Enter 发送）"
+                ? "输入问题，回车发送；Shift+回车换行（截图可 Ctrl+V 粘贴）"
                 : "现在是演示模式：可以先试试界面，填好 Key 之后才会真正让模型回答"
             }
             onChange={(e) => setText(e.target.value)}
             onPaste={(e) => void handlePaste(e)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                void handleSend();
-              }
+              // R9：**回车发送、Shift+回车换行**（用户要求；原来只有 Ctrl+回车能发）。
+              // ⚠ 必须避开中文输入法的候选确认：`isComposing` / keyCode 229 时**不发送**，
+              //   否则"打拼音时按回车选词"会变成"把半截拼音发出去"（悬浮球面板同一处坑，见 panel.js）。
+              if (e.key !== "Enter" || e.shiftKey) return;
+              if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+              e.preventDefault();
+              void handleSend();
             }}
           />
         </div>

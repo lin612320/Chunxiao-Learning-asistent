@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="春晓的云朵小精灵：一朵云托着初升的朝阳">
+  <!--
+    春晓「晨光云朵」母版（原创矢量，无任何第三方美术素材）。
+    ⚠ 这是**唯一母版**：
+      · App 内用 `src/components/Mascot.tsx`（`<img src={mascot.svg}>`，零重复实现）引用；
+      · App 图标由 `scripts/make-icons.ps1` 读取本文件、注入圆角底盘后光栅化
+        （光栅化由 `scripts/svg-to-png.mjs` 用无头 Edge + CDP 完成，零依赖）。
+    改形象只改这一个文件；改完务必重跑 `scripts/make-icons.ps1` 并跑一次质量闸门。
+
+    坐标空间 240×240。**视觉中心 = (120, 120)**（内容整体下移 15 单位后的结果，
+    用 scripts 里的几何校验确认过外接框上下留白均衡；改图后请重新校验）。
+    构图：朝阳在云后升起（中轴），嫩芽在云顶**左侧**（避开朝阳，免得绿压橙糊成一团）。
+  -->
+  <defs>
+    <!-- 朝阳：暖橙，从亮到饱和 -->
+    <linearGradient id="cxSun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE3AE"/>
+      <stop offset="0.5" stop-color="#FFC069"/>
+      <stop offset="1" stop-color="#FF9E52"/>
+    </linearGradient>
+    <!-- 云朵：白→春绿极浅，保持"春绿＝晨晓"的品牌同源 -->
+    <linearGradient id="cxCloud" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.6" stop-color="#F8FCFA"/>
+      <stop offset="1" stop-color="#E2F1E9"/>
+    </linearGradient>
+    <!-- 晨曦光晕 -->
+    <radialGradient id="cxGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFE7B8" stop-opacity="0.9"/>
+      <stop offset="0.55" stop-color="#FFE7B8" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#FFE7B8" stop-opacity="0"/>
+    </radialGradient>
+    <!-- 嫩芽：与品牌绿同源 -->
+    <linearGradient id="cxLeaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6FD3A6"/>
+      <stop offset="1" stop-color="#2F8F6B"/>
+    </linearGradient>
+    <!-- 云朵的柔和落影：给轮廓以定义。**不用描边** —— 云由多个圆叠成，
+         描边会在叠加处露出内部线条；落影才能得到一整块干净轮廓。
+         ⚠ 滤镜区域必须留够：区域太小会把影尾**硬切**出一道台阶（实测过）。
+         （另外：白云在亮色底上不靠描边定义，全靠这层落影 —— 它不能省。） -->
+    <filter id="cxSoft" x="-30%" y="-30%" width="160%" height="175%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#12402F" flood-opacity="0.20"/>
+    </filter>
+  </defs>
+
+  <g transform="translate(0 15)">
+    <!-- 晨曦光晕（最底层） -->
+    <circle cx="120" cy="104" r="80" fill="url(#cxGlow)"/>
+
+    <!-- 朝阳的光芒：只保留**露在云外**的那些（下方的会被云盖住，等于死代码）。
+         ⚠ **左侧那道水平光芒故意不画**：嫩芽正好长在左边，两者会在同一区域撞色，
+         把小尺寸（16–32px）糊成一团。嫩芽占左、光芒占右，构图依旧平衡。 -->
+    <g stroke="#FFC978" stroke-width="7.5" stroke-linecap="round" opacity="0.8">
+      <line x1="120" y1="20" x2="120" y2="38"/>
+      <line x1="55" y1="45" x2="68" y2="58"/>
+      <line x1="185" y1="45" x2="172" y2="58"/>
+      <line x1="210" y1="106" x2="190" y2="106"/>
+    </g>
+
+    <!-- 初升的朝阳：下半被云遮住 → 读作"日出" -->
+    <circle cx="120" cy="104" r="46" fill="url(#cxSun)"/>
+
+    <!-- 云朵身体：三个圆凸 + 圆角底座（同色无描边，靠落影成形） -->
+    <g fill="url(#cxCloud)" filter="url(#cxSoft)">
+      <circle cx="86" cy="150" r="34"/>
+      <circle cx="122" cy="132" r="42"/>
+      <circle cx="158" cy="150" r="33"/>
+      <rect x="86" y="150" width="72" height="34" rx="17"/>
+    </g>
+
+    <!-- 表情：眯眼笑（^ ^）＋ 小嘴 ＋ 腮红 —— 学生友好的"亲近"感 -->
+    <g fill="none" stroke="#1F4A38" stroke-width="4.5" stroke-linecap="round">
+      <path d="M96 145 q7 -8 14 0"/>
+      <path d="M130 145 q7 -8 14 0"/>
+      <path d="M113 156 q7 8 14 0"/>
+    </g>
+    <g fill="#F59E8E" opacity="0.45">
+      <ellipse cx="86" cy="157" rx="9.5" ry="6.5"/>
+      <ellipse cx="154" cy="157" rx="9.5" ry="6.5"/>
+    </g>
+
+    <!-- 云顶嫩芽：放在**左侧**（朝阳占中轴 x 74–166，绿压橙会糊） -->
+    <g>
+      <path d="M74 124 q-4 -14 -8 -22" fill="none" stroke="#3E8E63" stroke-width="4.5" stroke-linecap="round"/>
+      <path d="M66 102 q-18 -6 -24 4 q14 8 24 -4 z" fill="url(#cxLeaf)"/>
+      <path d="M66 102 q-10 -16 -24 -14 q6 14 24 14 z" fill="url(#cxLeaf)"/>
+    </g>
+  </g>
+</svg>

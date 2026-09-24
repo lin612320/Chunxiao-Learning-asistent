@@ -9,6 +9,7 @@
 //   ball_start_cmd / ball_show / ball_hide / ball_prefill / ball_quit
 
 import { callRust, invokeStrict, isTauri } from "./tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 // 前端（浏览器）访问不了文件系统，反向控制通过 fetch 调 Vite 插件来写控制文件
@@ -83,6 +84,32 @@ export async function ballQuit() {
   }
 }
 
+/**
+ * R7：把**主窗口当前正在看的课程**告诉悬浮球（球默认跟随它检索）。
+ *
+ * 为什么要有这一步：球的检索范围是球自己的设置，默认「不限定课程」——
+ * 用户在《数据库系统》里划词点「关联知识点」，实际会**查全库**，与按钮上写的
+ * 「先在这门课的材料 / 先验知识 / 知识点里查」不符（`docs/11` §一 第 2 条：
+ * 界面写什么就必须按什么查）。由主窗口在课程上下文变化时同步一次，两边就一致了。
+ *
+ * ⚠ 只在桌面版有意义（球是外部进程）；浏览器预览下静默跳过。
+ *   失败也不弹窗：这只是"让球更准一点"，不该打扰用户，更不该拦住导航。
+ *
+ * ⚠⚠ **刻意不走 `callRust` / `invokeStrict`**：这两个封装失败时都会 `console.error`，
+ *    而真机 UI 冒烟把 console error 当成失败（`scripts/smoke-desktop-ui.mjs`）。
+ *    这是一次**尽力而为**的后台同步（不是用户触发的写入），失败只该留个 warn：
+ *    0.7.2 的旧 exe 里没有 `ball_set_course`，本轮实测每次导航都会刷 3 条 console error，
+ *    把真机冒烟整层打红 —— 那条红**指向的是版本不匹配，不是功能坏了**，不该让它冒充功能失败。
+ */
+export async function ballSyncCourse(courseId: number | null) {
+  if (!isTauri()) return;
+  try {
+    await invoke<void>("ball_set_course", { courseId });
+  } catch (e) {
+    console.warn("[ball] 同步课程范围失败（不影响主界面，下次切换课程会重试）:", e);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // floating-ball → 主程序 推送监听（双模式）
 // ---------------------------------------------------------------------------
@@ -94,9 +121,13 @@ export interface BallPushPayload {
   /**
    * R4（`docs/11` §六 冻结字段）：这次推送所属的课程。
    * `action === "ask"` 时，主程序**已把问答写进该课程的会话**，前端只需刷新界面。
+   *
+   * ⚠ R5 起那个会话是**球专属**的（`chat_sessions.origin = "ball"`，标题「悬浮球问答」）：
+   * 主窗口默认只列 `origin = "app"` 的会话，所以球的问答**不会插进**用户正在看的那个对话里
+   * （用户要的「对话记录与主窗口分开」）。打开「含悬浮球记录」后才会一并列出。
    */
   course_id?: number | null;
-  /** R4：`action === "ask"` 时主程序落库所用的会话 id */
+  /** R4：`action === "ask"` 时主程序落库所用的会话 id（R5 起必为球专属会话） */
   session_id?: number;
 }
 

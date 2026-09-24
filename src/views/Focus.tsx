@@ -21,7 +21,6 @@ import {
   focusNotify,
   KIND_LABEL,
   PREVIEW_NOTIFY_NOTE,
-  PREVIEW_STATS_NOTE,
   rangeOf,
   type FocusKind,
 } from "../lib/focus";
@@ -444,17 +443,9 @@ export default function Focus() {
       <section className="card">
         <h3>专注统计</h3>
         {statsFailed ? (
-          <p className="empty">
-            暂时读不到本机统计（这次读取没有返回数据）。这里不会用估算的数字顶上，
-            请稍后重试或到「数据设置」检查本机数据。
-          </p>
+          <p className="empty">暂时读不到本机统计。</p>
         ) : noStats ? (
-          <p className="empty">
-            暂无记录。
-            {preview
-              ? PREVIEW_STATS_NOTE
-              : "完成一段专注或休息后，这里会显示今日分钟数与近 7 天柱状图。"}
-          </p>
+          <p className="empty">暂无记录。</p>
         ) : (
           <>
             <div className="stat-row">
@@ -505,7 +496,7 @@ export default function Focus() {
         {loading ? (
           <p className="loading-line">加载中…</p>
         ) : records.length === 0 ? (
-          <p className="empty">暂无记录。开始一段计时后，这里会显示每个阶段的计划时长与实际时长。</p>
+          <p className="empty">暂无记录。</p>
         ) : (
           <ul className="focus-record-list">
             {records.map((r) => {

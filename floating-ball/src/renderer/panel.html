@@ -3,258 +3,328 @@
 <head>
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
-<title>AI 小窗</title>
+<title>春晓</title>
 <style>
   :root {
-    --bg: linear-gradient(160deg,#161b22,#0d1117);
-    --surface: rgba(255,255,255,0.05);
-    --border: rgba(255,255,255,0.12);
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
-    --input-bg: rgba(255,255,255,0.04);
-    --code-bg: rgba(0,0,0,0.35);
-    --code-text: #e6edf3;
+    /* R11：配色换成 **「DeepSeek 云鲸纸面」**（maid-whale-webui 皮肤）的深色令牌；
+       运行时由 panel.js 的 applyTheme 覆盖成深/浅两套。 */
+    --bg: #172435;
+    --surface: rgba(28,45,66,.96);
+    --border: rgba(167,199,216,.18);
+    --text: #e4edf2;
+    --muted: #b9c8d2;
+    --accent: #83bcdc;
+    --accent-2: #6ea3c2;
+    --ok: #7fd1a5;
+    --danger: #f08a8a;
+    --input-bg: rgba(23,36,53,.92);
+    --code-bg: rgba(28,45,66,.98);
+    --code-text: #e4edf2;
+    /* 背景图上的雾色（皮肤原文：深色 rgba(18,31,47,.52)）—— 保证图上文字可读 */
+    --haze: rgba(18,31,47,.52);
+    /* 抽屉是**覆盖层**：必须不透明，否则底下的输入框会透上来，看着仍像叠字 */
+    --drawer-bg: #1c2d42;
+    --radius: 10px;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body { height:100%; overflow:hidden; background:transparent; }
   body {
-    font-family: 'Segoe UI','Microsoft YaHei',sans-serif;
-    color: var(--text); font-size:14px; line-height:1.5;
-    background: var(--bg);
-    border-radius: 14px; border:1px solid var(--border);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    color: var(--text); font-size:13.5px; line-height:1.55;
+    /* R11：**背景图** —— 「云鲸女仆」插画 + 一层雾色（与皮肤同一套叠法：
+         雾色在上、插画居中偏下、底色打底）。图放在 assets/，随包分发。 */
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--haze), var(--haze)),
+      url("../../assets/bg-cloud-whale-maid.webp");
+    background-size: cover, cover;
+    background-position: center, calc(50% + 30px) calc(100% - 10px);
+    background-repeat: no-repeat, no-repeat;
+    border-radius: 16px 19px 15px 18px;   /* 云鲸纸面的"手绘感"圆角（四角不等） */
+    border:1px solid var(--border);
     -webkit-app-region: no-drag;
   }
-  .app { display:flex; flex-direction:column; height:100%; }
+  .app { display:flex; flex-direction:column; height:100%; position:relative; }
 
-  /* 顶栏 */
+  /* ---------- 顶栏 ---------- */
   .top {
-    height:42px; flex:0 0 auto;
-    display:flex; align-items:center; gap:4px; padding:0 8px;
+    height:38px; flex:0 0 auto;
+    display:flex; align-items:center; gap:2px; padding:0 7px;
     border-bottom:1px solid var(--border); background:var(--surface);
     cursor: grab;
   }
   .top.dragging { cursor: grabbing; }
-  .brand { font-weight:700; letter-spacing:1px; margin-right:auto; color:var(--accent); font-size:13px; }
+  .brand { font-weight:700; letter-spacing:.5px; margin-right:auto; color:var(--accent); font-size:13px; }
   .iconbtn {
-    width:28px; height:28px; border-radius:8px; border:1px solid transparent;
-    background:transparent; color:var(--text); cursor:pointer; font-size:14px;
+    width:27px; height:27px; border-radius:8px; border:1px solid transparent;
+    background:transparent; color:var(--text); cursor:pointer; font-size:13px;
     display:flex; align-items:center; justify-content:center;
-    transition: background .15s, border-color .15s;
+    transition: background .15s, border-color .15s, color .15s;
   }
   .iconbtn:hover { background:var(--surface); border-color:var(--border); }
 
-  /* 内容 */
-  .body { flex:1 1 auto; display:flex; flex-direction:column; padding:10px; gap:8px; overflow:auto; }
-  .field { display:flex; flex-direction:column; gap:6px; }
-  .label { font-size:12px; color:var(--muted); }
+  /* ---------- 主体 ---------- */
+  .body { flex:1 1 auto; display:flex; flex-direction:column; padding:8px 10px 10px; gap:7px; min-height:0; }
+
   textarea, input, select {
     width:100%; background:var(--input-bg); color:var(--text);
-    border:1px solid var(--border); border-radius:10px;
-    padding:9px 10px; font-size:13px; outline:none; font-family:inherit;
-    resize:vertical;
+    border:1px solid var(--border); border-radius:var(--radius);
+    padding:8px 10px; font-size:13px; outline:none; font-family:inherit;
   }
-  textarea { min-height:60px; max-height:140px; }
+  textarea { resize:none; line-height:1.5; }
   textarea:focus, input:focus, select:focus { border-color:var(--accent); }
+  ::placeholder { color:var(--muted); opacity:.85; }
 
-  .actions { display:flex; gap:6px; flex-wrap:wrap; }
-  .btn {
-    flex:1; min-width:0; padding:9px 10px; border-radius:10px; cursor:pointer;
-    border:1px solid var(--border); background:var(--surface); color:var(--text);
-    font-size:13px; transition: all .15s; white-space:nowrap;
+  /* 课程上下文行 */
+  .course-row { display:flex; align-items:center; gap:7px; flex:0 0 auto; }
+  .course-row label { font-size:12px; color:var(--muted); flex:0 0 auto; }
+  .course-row select { flex:1; min-width:0; }
+  .scope { font-size:11px; color:var(--muted); flex:0 0 auto; white-space:nowrap; max-width:40%; overflow:hidden; text-overflow:ellipsis; }
+
+  /* 抓取模式：带文字的段式按钮（**不是**图标按钮 —— 图标按钮没人找得到） */
+  .grab-row { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+  .grab-row .grab-cap { font-size:12px; color:var(--muted); flex:0 0 auto; }
+  .grab-q {
+    flex:1; padding:6px 10px; border-radius:9px; cursor:pointer;
+    border:1.5px solid var(--border); background:var(--input-bg); color:var(--muted);
+    font-size:12.5px; font-weight:500; transition:all .15s; white-space:nowrap; font-family:inherit;
   }
-  .btn:hover { border-color:var(--accent); }
-  .btn.primary { background:var(--accent); color:#0b1418; font-weight:700; border-color:transparent; }
-  .btn:disabled { opacity:.45; cursor:not-allowed; }
-  .btn.relate { opacity:.7; }
-  .btn.relate::after { content:' 📚'; font-size:11px; }
-  /* R4：粘贴进来的图片（待发送） */
+  .grab-q:hover { color:var(--text); border-color:var(--accent); }
+  .grab-q.active {
+    color:#fff; font-weight:700;
+    background:linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color:var(--accent);
+  }
+
+  /* 结果区：**唯一允许伸缩的一块**。它有 min-height 兜底，所以面板再小也不会把下面压没。 */
+  .result-wrap { flex:1 1 auto; min-height:44px; display:flex; flex-direction:column; gap:5px; }
+  .result-head { display:flex; align-items:center; gap:5px; flex:0 0 auto; }
+  .result-head .title { font-size:12px; color:var(--muted); }
+  .result-head .spacer { margin-left:auto; }
+  .result {
+    flex:1 1 auto; overflow:auto; padding:10px 12px; border-radius:var(--radius);
+    background:var(--input-bg); border:1px solid var(--border); min-height:0;
+  }
+  /* R5.1：**结果区空着就是空着**，不放"结果会显示在这里…"这类占位提示（用户明确不要）。
+     别再加回来 —— 空白本身已经说明"还没有结果"，多一句话只是噪音。 */
+  .result:empty { background:var(--input-bg); }
+  .result h1,.result h2,.result h3 { margin:9px 0 4px; line-height:1.3; }
+  .result h1{font-size:17px}.result h2{font-size:15px}.result h3{font-size:13.5px}
+  .result p { margin:6px 0; }
+  .result ul,.result ol { margin:6px 0 6px 20px; }
+  .result li { margin:2px 0; }
+  .result code { background:var(--code-bg); color:var(--code-text); padding:1px 5px; border-radius:5px; font-size:12px; }
+  .result pre { background:var(--code-bg); padding:10px; border-radius:8px; overflow:auto; margin:6px 0; }
+  .result pre code { background:none; padding:0; }
+  .result strong { color:var(--accent); }
+  .result blockquote { border-left:3px solid var(--accent); padding-left:9px; margin:6px 0; }
+  .result hr { border:none; border-top:1px solid var(--border); margin:9px 0; }
+  .cursor { display:inline-block; width:7px; height:14px; background:var(--accent); margin-left:2px; vertical-align:middle; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .status { font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* 关联命中的三块 */
+  .hit { padding:6px 8px; border:1px solid var(--border); border-radius:8px; margin:4px 0; background:var(--surface); }
+  .hit .hit-src { font-size:11px; color:var(--accent); margin-bottom:2px; }
+  .hit .hit-body { font-size:12.5px; }
+
+  /* 候选知识点确认区（必须用户勾选 + 可编辑 → 才入库） */
+  .cand { margin-top:8px; padding:9px 10px; border:1px dashed var(--accent); border-radius:var(--radius); background:var(--surface); }
+  .cand-head { font-size:12px; color:var(--muted); margin-bottom:6px; line-height:1.5; }
+  .cand-item { display:flex; align-items:flex-start; gap:7px; padding:5px 0; border-bottom:1px solid var(--border); }
+  .cand-item:last-of-type { border-bottom:none; }
+  .cand-item input[type=checkbox] { width:auto; flex:0 0 auto; margin-top:3px; accent-color:var(--accent); }
+  .cand-fields { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+  .cand-topic { font-weight:600; }
+  .cand-sum { font-size:12px; }
+  .cand-actions { display:flex; gap:6px; margin-top:8px; }
+
+  /* ---------- 输入区：**两个框**（先"抓取的内容"，再"我要问什么"） ---------- */
+  /* 面板可以被拉小，所以这一块**允许被压缩**（`flex:0 1 auto`）；
+     但按钮行 `.actions` 是 .body 的直接子元素、`flex:0 0 auto`，**永远不参与压缩** ——
+     否则窗口一矮，最后一行就被裁到窗口外（"点不到按钮"就是这么来的）。 */
+  /* 输入区：**不参与压缩**（`flex:0 0 auto`）。
+     理由：它一旦被压缩，内部"标签 + 两个框"就会互相重叠（实测过 —— 源框底 342 / 问题框顶 346，
+     标签被挤到框底下）。空间不够时由**结果区**让位（它可滚、可缩到 44px）；
+     内容框的高度上限由 JS 按视口给（见 panel.js 的 autoGrow），所以不会无限长。 */
+  .compose { flex:0 0 auto; min-height:0; display:flex; flex-direction:column; gap:7px; }
+  .field { display:flex; flex-direction:column; gap:4px; flex:0 0 auto; }
+  .field > .label { font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+  .field > .label .cap-hint { font-size:11px; color:var(--muted); opacity:.85; }
+  #source { flex:0 0 auto; min-height:44px; max-height:150px; overflow:auto; }
+  #question { flex:0 0 auto; min-height:32px; max-height:110px; overflow:auto; }
+
   .img-strip { display:flex; flex-wrap:wrap; gap:6px; }
   .img-strip:empty { display:none; }
-  .img-thumb { position:relative; width:54px; height:54px; }
+  .img-thumb { position:relative; width:50px; height:50px; }
   .img-thumb img {
     width:100%; height:100%; object-fit:cover; border-radius:8px;
     border:1px solid var(--border); display:block; cursor:zoom-in;
   }
   .img-thumb-x {
     position:absolute; top:-5px; right:-5px; width:16px; height:16px; line-height:14px;
-    text-align:center; border-radius:50%; background:#d1242f; color:#fff;
+    text-align:center; border-radius:50%; background:var(--danger); color:#fff;
     font-size:11px; font-weight:700; cursor:pointer; border:none; padding:0;
   }
-  .img-hint { font-size:11px; color:var(--muted); line-height:1.5; }
+  .img-hint { font-size:11px; color:var(--muted); }
   .img-hint:empty { display:none; }
 
-  /* R4：课程上下文行（R1 阶段 2） */
-  .course-row { display:flex; align-items:center; gap:8px; }
-  .course-row label { font-size:12px; color:var(--muted); flex:0 0 auto; white-space:nowrap; }
-  .course-row select { flex:1; }
-
-  .result-wrap { flex:1; min-height:100px; display:flex; flex-direction:column; gap:6px; }
-  .result-head { display:flex; align-items:center; gap:6px; }
-  .result-head .title { font-size:12px; color:var(--muted); }
-  .result-head .spacer { margin-left:auto; }
-  .result {
-    flex:1; overflow:auto; padding:10px 12px; border-radius:10px;
-    background:var(--input-bg); border:1px solid var(--border);
-    font-size:13px; line-height:1.6;
+  .actions { display:flex; gap:6px; align-items:stretch; flex:0 0 auto; }
+  .btn {
+    flex:1; min-width:0; padding:9px 10px; border-radius:var(--radius); cursor:pointer;
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    font-size:13px; transition: all .15s; white-space:nowrap; font-family:inherit;
   }
-  .result:empty::before { content:'结果将显示在此…'; color:var(--muted); }
-  .result h1,.result h2,.result h3 { margin:8px 0 4px; line-height:1.3; }
-  .result h1{font-size:18px}.result h2{font-size:16px}.result h3{font-size:14px}
-  .result p { margin:6px 0; }
-  .result ul,.result ol { margin:6px 0 6px 22px; }
-  .result code { background:var(--code-bg); color:var(--code-text); padding:1px 5px; border-radius:5px; font-size:12px; }
-  .result pre { background:var(--code-bg); padding:10px; border-radius:8px; overflow:auto; margin:6px 0; }
-  .result pre code { background:none; padding:0; }
-  .result strong { color:var(--accent); }
-  .cursor { display:inline-block; width:7px; height:14px; background:var(--accent); margin-left:2px; vertical-align:middle; animation: blink 1s steps(2) infinite; }
-  @keyframes blink { 50% { opacity:0; } }
-  .status { font-size:11px; color:var(--muted); }
+  .btn:hover { border-color:var(--accent); }
+  .btn.primary { background:linear-gradient(135deg, var(--accent), var(--accent-2)); color:#fff; font-weight:700; border-color:transparent; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .btn.small { flex:0 0 auto; padding:9px 12px; font-size:12.5px; }
 
+  /* ---------- 设置抽屉 ----------
+     ⚠ R11 修的真缺陷（用户："悬浮球点开设置后窗口文字重叠"）：
+       抽屉原来是 `.app` flex 列里的**第三个兄弟**（top / body / drawer），
+       而 `.body` 的子项全是 `flex:0 0 auto` 且各有 min-height —— 抽屉一占掉 60% 高，
+       `.body` 被压到比它自己内容还矮，**它的子项就直接溢出到抽屉上面去**（看着就是文字叠字）。
+       修法：抽屉改成**覆盖层**（absolute 盖住 top 以下整块 + 自己内部滚动）。
+       这样它与 `.body` 不再争同一段高度，面板拉到多小都不会叠。 */
   .drawer {
     display:none; flex-direction:column; gap:8px;
-    padding:10px; border-top:1px solid var(--border); background:var(--surface);
+    padding:10px; border-top:1px solid var(--border); background:var(--drawer-bg);
+    overflow:auto; overscroll-behavior: contain;
+    position:absolute; left:0; right:0; top:38px; bottom:0; z-index:30;
   }
   .drawer.open { display:flex; }
-  .row { display:flex; gap:8px; align-items:center; }
-  .row label { width:74px; font-size:12px; color:var(--muted); flex:0 0 74px; }
+  .row { display:flex; gap:8px; align-items:center; min-width:0; }
+  .row label { width:68px; font-size:12px; color:var(--muted); flex:0 0 68px; }
+  .row :is(input, select) { min-width:0; }
   .hotkey-box {
     display:flex; align-items:center; gap:6px;
     background:var(--input-bg); border:1px solid var(--border);
-    border-radius:10px; padding:6px 10px; flex:1;
-    min-height:36px;
+    border-radius:var(--radius); padding:5px 9px; flex:1; min-height:34px;
   }
   .hotkey-box.recording { border-color:var(--accent); background:rgba(88,166,255,0.08); }
-  .hotkey-text { font-size:13px; color:var(--text); flex:1; }
+  .hotkey-text { font-size:13px; flex:1; }
   .hotkey-btn {
-    padding:4px 10px; border-radius:6px; border:1px solid var(--border);
-    background:transparent; color:var(--muted); cursor:pointer; font-size:12px;
+    padding:3px 9px; border-radius:6px; border:1px solid var(--border);
+    background:transparent; color:var(--muted); cursor:pointer; font-size:12px; font-family:inherit;
   }
   .hotkey-btn:hover { color:var(--accent); border-color:var(--accent); }
-
-  /* 抓取模式切换（分段控件，选中态强对比） */
   .grab-box { display:flex; gap:8px; }
   .grab-opt {
-    flex:1; position:relative;
-    display:flex; align-items:center; justify-content:center; gap:6px;
-    padding:10px 0; border-radius:10px; font-size:13px; cursor:pointer;
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:9px 0; border-radius:var(--radius); font-size:13px; cursor:pointer;
     border:1.5px solid var(--border); background:var(--input-bg); color:var(--muted);
-    font-weight:500; transition: all .18s ease;
+    font-family:inherit; transition: all .18s ease;
   }
-  .grab-opt .grab-ico { font-size:15px; filter: grayscale(1) opacity(.7); transition: all .18s; }
   .grab-opt:hover { border-color:var(--accent); color:var(--text); }
-  /* 选中：实心渐变 + 发光 + 白字 + 图标高亮 + 右上角对勾 */
   .grab-opt.active {
     color:#fff; font-weight:700;
-    background: linear-gradient(135deg, var(--accent), #7c5cff);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
     border-color: var(--accent);
-    box-shadow: 0 4px 14px rgba(88,166,255,.45), inset 0 0 0 1px rgba(255,255,255,.15);
   }
-  .grab-opt.active .grab-ico { filter:none; transform: scale(1.1); }
-  .grab-opt.active::after {
-    content: '✓'; position:absolute; top:-7px; right:-6px;
-    width:18px; height:18px; line-height:18px; text-align:center;
-    background:#3fb950; color:#fff; font-size:11px; font-weight:700;
-    border-radius:50%; box-shadow:0 1px 4px rgba(0,0,0,.4);
-  }
-  .grab-hint { font-size:11px; color:var(--muted); line-height:1.5; min-height:16px; }
+  .grab-hint { font-size:11px; color:var(--muted); line-height:1.5; min-height:15px; }
 
-  /* 主面板快捷抓取切换 */
-  .grab-quick { display:flex; align-items:center; padding:0 2px; }
-  .grab-q {
-    flex:0 0 auto; padding:7px 12px; border-radius:10px; cursor:pointer;
-    border:1.5px solid var(--border); background:var(--input-bg); color:var(--muted);
-    font-size:12.5px; font-weight:500; transition:all .15s; white-space:nowrap;
-  }
-  .grab-q:hover { color:var(--text); border-color:var(--accent); }
-  .grab-q.active {
-    color:#fff; font-weight:700;
-    background:linear-gradient(135deg, var(--accent), #7c5cff);
-    border-color:var(--accent);
-  }
-
-  /* 文本拖入面板提示 */
+  /* 拖入提示 */
   body.drop-active::after {
-    content: '松开以放入文本';
+    content: '松开以放入内容';
     position: fixed; inset: 8px; z-index: 9999;
     display: flex; align-items: center; justify-content: center;
     border: 2px dashed var(--accent); border-radius: 12px;
     background: rgba(88,166,255,.12); color: var(--accent);
-    font-size: 15px; font-weight: 600; pointer-events: none;
+    font-size:15px; font-weight:600; pointer-events:none;
   }
-
-  .modal-mask {
-    position:fixed; inset:0; background:rgba(0,0,0,.5);
-    display:none; align-items:center; justify-content:center;
-    z-index:10;
-  }
-  .modal-mask.show { display:flex; }
-  .modal {
-    width:340px; padding:16px; border-radius:12px;
-    background:var(--bg); border:1px solid var(--border);
-    display:flex; flex-direction:column; gap:10px;
-  }
-  .modal-title { font-weight:700; color:var(--text); }
-  .modal-body textarea { min-height:80px; }
-  .modal-actions { display:flex; gap:8px; justify-content:flex-end; }
-  .modal-actions .btn { flex:0 0 auto; min-width:72px; }
 </style>
 </head>
 <body>
 <div class="app">
+  <!-- 顶栏：只放"窗口级"操作。抓取模式**不在这里** —— 它带文字、看得见，放在正文里 -->
   <div class="top" id="top">
-    <span class="brand">AI 助手</span>
-    <button class="iconbtn" id="btnApp" title="推送到春晓">📋</button>
+    <span class="brand">春晓</span>
+    <button class="iconbtn" id="btnApp" title="把「抓取的内容」推送到春晓主窗口">📋</button>
     <button class="iconbtn" id="btnSkinPicker" title="换球皮肤">◐</button>
     <button class="iconbtn" id="btnTheme" title="明/暗主题">🌙</button>
     <button class="iconbtn" id="btnSettings" title="设置">⚙</button>
-    <button class="iconbtn" id="btnClose" title="隐藏">✕</button>
+    <button class="iconbtn" id="btnClose" title="隐藏面板">✕</button>
   </div>
 
   <div class="body">
-    <!-- R4：课程上下文（R1 阶段 2）—— 课程列表与当前选择由主程序下发，改动即回写 -->
+    <!-- 课程上下文：主程序为单一事实来源；关联检索与知识点入库都按它走 -->
     <div class="course-row">
       <label>课程</label>
-      <select id="courseSel" title="选好之后：材料检索只在这门课里查，问春晓的问答也归到这门课">
+      <select id="courseSel" title="关联检索、问询、知识点入库都按这门课走">
         <option value="">不限定课程</option>
       </select>
+      <span class="scope" id="scopeHint"></span>
     </div>
 
-    <div class="field">
-      <div class="label">要问春晓的内容</div>
-      <textarea id="source" placeholder="选中文字会自动填到这里；也可手动输入；截图后可直接 Ctrl+V 粘贴图片"></textarea>
-    </div>
-
-    <!-- R4：粘贴进来的图片（缩略图，可单张删除） -->
-    <div class="img-strip" id="imgStrip"></div>
-    <div class="img-hint" id="imgHint"></div>
-
-    <div class="actions">
-      <button class="btn relate" id="btnRelate" title="在你导入的课程材料中查找（本机检索，不联网）">材料</button>
-      <button class="btn primary" id="btnAsk" title="把上面的内容连图片一起问春晓">问春晓</button>
-    </div>
-
-    <!-- 抓取模式快捷切换（与「设置」抽屉同步）：自动抓取 / 手动拖入 -->
-    <div class="row grab-quick" style="gap:6px;">
-      <span style="font-size:12px;color:var(--muted);white-space:nowrap;">抓取</span>
-      <button type="button" class="grab-q" id="qAuto">🔄 自动抓取</button>
-      <button type="button" class="grab-q" id="qManual">✋ 手动拖入</button>
+    <!-- 抓取模式：两个带文字的按钮，随时可见、可切换（与设置抽屉同步） -->
+    <div class="grab-row">
+      <span class="grab-cap">抓取</span>
+      <button type="button" class="grab-q" id="qAuto" title="鼠标选中文字、松开即自动抓到下面的内容框">🔄 自动抓取</button>
+      <button type="button" class="grab-q" id="qManual" title="不主动抓取，把选中的文字拖进本窗口的内容框">✋ 手动拖入</button>
     </div>
 
     <div class="result-wrap">
       <div class="result-head">
-        <span class="title">结果</span>
+        <span class="title" id="resultTitle">结果</span>
         <span class="status" id="status"></span>
         <span class="spacer"></span>
-        <button class="iconbtn" id="btnStop" title="停止">⏹</button>
-        <button class="iconbtn" id="btnCopy" title="复制">⧉</button>
-        <button class="iconbtn" id="btnClear" title="清空结果">🗑</button>
+        <!-- R5.1：这三个原来是 emoji（⏹ ⧉ 🗑）。`⧉`(U+29C9) 在 Windows 的 Segoe UI 里
+             **没有字形，会渲染成一个白方块** —— 实测截图里就是这么出现的。
+             改成内联 SVG（走 currentColor，随主题变色），与主窗口 R3 的做法一致。 -->
+        <button class="iconbtn" id="btnStop" title="停止生成">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <rect x="3" y="3" width="8" height="8" rx="1.5" />
+          </svg>
+        </button>
+        <button class="iconbtn" id="btnCopy" title="复制结果">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+            <rect x="5" y="5" width="7" height="7" rx="1.5" />
+            <path d="M9 5V3.5A1.5 1.5 0 0 0 7.5 2h-4A1.5 1.5 0 0 0 2 3.5v4A1.5 1.5 0 0 0 3.5 9H5" />
+          </svg>
+        </button>
+        <button class="iconbtn" id="btnClear" title="清空结果">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+            <path d="M2.5 4h9" />
+            <path d="M5.5 4V2.8A.8.8 0 0 1 6.3 2h1.4a.8.8 0 0 1 .8.8V4" />
+            <path d="M3.6 4l.6 7a1 1 0 0 0 1 .9h3.6a1 1 0 0 0 1-.9l.6-7" />
+          </svg>
+        </button>
       </div>
       <div class="result" id="result"></div>
     </div>
+
+    <div class="compose">
+      <!-- 框一：抓到的/拖进来的原文内容 -->
+      <div class="field">
+        <div class="label">
+          <span>抓取的内容</span>
+          <span class="cap-hint">拖入 / 划词自动填 / 截图可 Ctrl+V 粘贴</span>
+        </div>
+        <textarea id="source" placeholder="把选中的文字拖到这里，或在自动抓取模式下直接划词；截图（Win+Shift+S）后可在这里 Ctrl+V 粘贴。"></textarea>
+      </div>
+
+      <div class="img-strip" id="imgStrip"></div>
+      <div class="img-hint" id="imgHint"></div>
+
+      <!-- 框二：我要问什么 -->
+      <div class="field">
+        <div class="label">
+          <span>我要问什么</span>
+          <span class="cap-hint">回车=问询，Shift+回车=换行</span>
+        </div>
+        <textarea id="question" placeholder="例如：这段里的势能法为什么能把扩容成本摊到常数？（留空则把「抓取的内容」直接问出去）"></textarea>
+      </div>
+    </div>
+
+    <!-- 按钮行在 .compose **之外**：它永远不参与压缩，面板拉小也不会被裁掉 -->
+    <div class="actions">
+      <button class="btn primary" id="btnAsk" title="用「抓取的内容」作上下文，回答「我要问什么」">问询</button>
+      <button class="btn" id="btnRelate" title="先在这门课的材料 / 先验知识 / 知识点里查，再决定要不要把新知识点加进去">关联知识点</button>
+    </div>
   </div>
 
-  <!-- 设置抽屉 -->
+  <!-- 设置抽屉：不占主界面 -->
   <div class="drawer" id="setDrawer">
     <div class="row"><label>AI 平台</label>
       <select id="cfgProvider" style="flex:1;">
@@ -279,21 +349,18 @@
       </div>
     </div>
     <div class="row" style="flex-direction:column; align-items:stretch; gap:6px;">
-      <label>抓取模式</label>
+      <label style="width:auto;">抓取模式</label>
       <div class="grab-box" id="grabBox">
-        <button type="button" class="grab-opt" id="grabAuto"><span class="grab-ico">🔄</span><span class="grab-name">自动抓取</span></button>
-        <button type="button" class="grab-opt" id="grabManual"><span class="grab-ico">✋</span><span class="grab-name">手动拖入</span></button>
+        <button type="button" class="grab-opt" id="grabAuto"><span>🔄</span><span>自动抓取</span></button>
+        <button type="button" class="grab-opt" id="grabManual"><span>✋</span><span>手动拖入</span></button>
       </div>
       <div class="grab-hint" id="grabHint"></div>
     </div>
     <div class="row" style="justify-content:flex-end; gap:6px;">
-      <button class="btn" id="btnTest" style="flex:0 0 auto; width:90px;">测试 Key</button>
-      <button class="btn primary" id="btnSave" style="flex:0 0 auto; width:110px;">保存</button>
+      <button class="btn small" id="btnTest">测试 Key</button>
+      <button class="btn primary small" id="btnSave">保存</button>
     </div>
   </div>
-
-  <!-- R4：原「询问对话框」已删除 —— 用户要求"正文直接铺在下方显示要问的内容"，
-       不再用模态框二次输入问题（少一步、也不会把上下文藏在弹窗里）。 -->
 </div>
 <script src="panel.js"></script>
 </body>

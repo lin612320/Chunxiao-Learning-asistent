@@ -22,21 +22,50 @@ let bubbleWin = null;
 let skinPickerWin = null;
 let panelVisible = false;
 
-// 尺寸“看门狗”：任何途径（含系统/未知原因）把球或面板窗口改大，
-// 都在 800ms 内强制拉回各自的固定尺寸，彻底杜绝“越拖越大”。
+// R5：面板**可以缩放**了（旧版把最小=最大写成固定值，是"不能缩放"的根因）。
+//   边界值放在这里，主进程与渲染层都不再各自写一遍。
+const PANEL_MIN_W = 360;
+// R5.1：最小高度从 420 提到 460 —— 420 时结果区只剩 ~36px（仅够一行），
+// 而"两个框 + 两个按钮"是硬需求、不能压缩，只能给结果区留出这点位置。
+// 460 起结果区有 ~76px，能看清标题与首句。
+const PANEL_MIN_H = 460;
+const PANEL_MAX_W = 900;
+const PANEL_MAX_H = 1200;
+
+let onPanelResize = null;
+/** 由 main.js 注入：把用户调过的尺寸落盘（config.panelWidth/Height） */
+function setPanelResizeHandler(fn) { onPanelResize = fn; }
+
+function clampNum(v, lo, hi, dflt) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return dflt;
+  return Math.min(hi, Math.max(lo, Math.round(n)));
+}
+
+// 尺寸“看门狗”。
+//   · 悬浮球：**尺寸硬锁**（56×56）—— 任何途径改大都在 800ms 内拉回；
+//   · 面板：R5 起改为**钳制**（只在越界时拉回）—— 用户拖动边框缩放**被允许**，
+//     但仍挡住 Windows/Aero Snap 把窗口顶到越界尺寸那类"越拖越大"。
 let sizeWatchdog = null;
-function ensureFixedSize(win) {
+function ensureBallSize(win) {
   if (!win || win.isDestroyed() || win._fixedW == null || win._fixedH == null) return;
   const [cw, ch] = win.getSize();
   if (cw !== win._fixedW || ch !== win._fixedH) {
     win.setSize(win._fixedW, win._fixedH, false);
   }
 }
+function clampPanelSize(win) {
+  if (!win || win.isDestroyed() || win._minW == null) return;
+  const [cw, ch] = win.getSize();
+  const nw = Math.min(win._maxW, Math.max(win._minW, cw));
+  const nh = Math.min(win._maxH, Math.max(win._minH, ch));
+  if (nw !== cw || nh !== ch) win.setSize(nw, nh, false);
+}
 function startSizeWatchdog() {
   if (sizeWatchdog) return;
   sizeWatchdog = setInterval(() => {
-    ensureFixedSize(ballWin);
-    ensureFixedSize(panelWin);
+    ensureBallSize(ballWin);
+    clampPanelSize(panelWin);
   }, 800);
 }
 function stopSizeWatchdog() {
@@ -176,34 +205,49 @@ function updateBubblePosition() {
 
 function createPanel(config) {
   const workArea = screen.getPrimaryDisplay().workArea;
-  const w = config.panelWidth || 420;
-  const h = Math.min(620, Math.round(workArea.height - 80));
+  const w = clampNum(config.panelWidth, PANEL_MIN_W, PANEL_MAX_W, 420);
+  // 上限跟着屏幕走：小屏上"最高 1200"会顶出工作区，用户就再也拖不回来了
+  const maxH = Math.min(PANEL_MAX_H, Math.max(PANEL_MIN_H, workArea.height - 40));
+  const h = clampNum(config.panelHeight, PANEL_MIN_H, maxH, Math.min(620, maxH));
   panelWin = new BrowserWindow({
     width: w, height: h,
     x: Math.max(8, workArea.x + 16),
-    y: Math.round(workArea.y + (workArea.height - h) / 2),
-    frame: false, transparent: true, resizable: false,
+    y: Math.round(workArea.y + Math.max(0, (workArea.height - h) / 2)),
+    frame: false, transparent: true, resizable: true,
+    minWidth: PANEL_MIN_W, minHeight: PANEL_MIN_H,
+    maxWidth: PANEL_MAX_W, maxHeight: maxH,
     alwaysOnTop: true, skipTaskbar: true, show: false,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'panel-preload.js'),
       contextIsolation: true, nodeIntegration: false
     }
   });
-  // 面板尺寸固定（resizable:false + 最小=最大）：防止拖顶栏时被 Windows 当作
-  // “上边/边缘缩放”而每次拖拽都慢慢变大。
-  panelWin.setMinimumSize(w, h);
-  panelWin.setMaximumSize(w, h);
-  panelWin.setResizable(false);
-  panelWin._fixedW = w;
-  panelWin._fixedH = h;
-  const enforcePanelSize = () => {
+  // R5：可缩放。旧实现 `setMinimumSize(w,h)=setMaximumSize(w,h)` 把窗口钉死，
+  //     是"面板不能调大小"的直接原因；现在只给出上下限，并用看门狗钳制越界。
+  panelWin.setMinimumSize(PANEL_MIN_W, PANEL_MIN_H);
+  panelWin.setMaximumSize(PANEL_MAX_W, maxH);
+  panelWin._minW = PANEL_MIN_W;
+  panelWin._minH = PANEL_MIN_H;
+  panelWin._maxW = PANEL_MAX_W;
+  panelWin._maxH = maxH;
+  // 改尺寸后 400ms 防抖落盘。`_suppressSave` 用于程序自身的收起/展开——
+  // 收起态高度（64）绝不能被当成"用户想要的展开高度"存下来。
+  let saveTimer = null;
+  panelWin.on('resized', () => {
     if (!panelWin || panelWin.isDestroyed()) return;
+    if (panelWin._suppressSave) return;
     const [cw, ch] = panelWin.getSize();
-    if (cw !== w || ch !== h) panelWin.setSize(w, h, false);
-  };
-  panelWin.on('resize', enforcePanelSize);
-  panelWin.on('resized', enforcePanelSize);
-  panelWin.on('moved', enforcePanelSize);
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      if (onPanelResize) onPanelResize(cw, ch);
+    }, 400);
+  });
+  panelWin.on('closed', () => {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    panelWin = null;
+    panelVisible = false;
+  });
   startSizeWatchdog();
   panelWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   panelWin.setAlwaysOnTop(true, 'floating');
@@ -224,7 +268,6 @@ function createPanel(config) {
       }
     }
   });
-  panelWin.on('closed', () => { panelWin = null; panelVisible = false; });
   panelWin.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   return panelWin;
 }
@@ -321,6 +364,8 @@ function showBall(config) {
 module.exports = {
   createBall, createBubble, createPanel, createSkinPicker,
   showPanel, hidePanel, togglePanel,
+  setPanelResizeHandler,
+  PANEL_MIN_W, PANEL_MIN_H, PANEL_MAX_W,
   showBall, hideBall,
   applySkinToBall, applySkinToPanel,
   sendToPanel, showBubble, hideBubble, updateBubblePosition,

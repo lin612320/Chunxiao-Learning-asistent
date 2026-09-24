@@ -1,54 +1,129 @@
 /* ==========================================================================
    设计令牌
-   品牌色取自「春晓」：晨光春绿渐变（#3aa87e → #1f6b4f）。
-   设计理念：春绿＝晨晓、生长；渐变＝从晨光到林荫，呼应"课后理解与复习"的
-   陪伴定位。因此主色用春绿，强调态复用品牌绿渐变；中性色统一带绿调冷灰，
-   让亮/暗两套主题都与品牌绿同源。
-   语义色另立一套：错误/删除用深砖红，与品牌绿正交，互不干扰。
-   对比度说明（实测，非估计）：
-     - --brand-solid  #25775a：白字 5.4:1，可作实底（按钮 / 气泡 / 角标）。
-     - --brand        #2f8f6b：非实底场景（描边 / 圆点 / 渐变）使用；
-                                  作文字色时配 --brand-soft 浅底 4.7:1。
+   R10：主题整体换成 **DSH（鲸鱼娘）** 的设计语言。
+
+   令牌值**不是手调的**，而是逐值取自 DSH 自己的主题包
+   `@deepseek-ai/dsh-client-ui-theme`：
+     · `--dsw-static-*` 原始色板
+     · `--dsw-alias-*`  语义令牌（分浅色 / 深色两套）
+   做法：先把 DSH 的色板与语义令牌**原样搬进来**（下面那一大段 `--dsw-*`），
+   再把春晓自己的令牌（`--brand` / `--surface` / `--text` …）**指向**语义令牌。
+   好处：组件 CSS 一行都不用改；以后 DSH 换主题，只要把 `--dsw-*` 那段重新抄一遍。
+
+   关键取色（都能在 DSH 主题包里逐字对上）：
+     · 底色       bg-base        浅 #fff      / 深 #151517   （DSH 的启动底色）
+     · 卡片       bg-layer-1     浅 #fff      / 深 #232324
+     · 页面/侧栏  sidebar-fill   浅 #f9fafb  / 深 #1b1b1c
+     · 主操作     brand-primary  浅 #0f1115  / 深 #f9fafb   —— DSH 的主按钮是**单色**的
+     · 品牌蓝     deepseek-500 #4176e6 / deepseek-450 #5686fe（链接与强调）
+     · 用户气泡   specific-bubble 浅 #edf3fe / 深 #2c2c2e   —— DSH 的对话气泡是**淡色底**，不是实心主色
+
+   对比度（沿用上一版的实测口径）：
+     · `--brand-solid` 浅 #0f1115 铺白字 18:1；深 #f9fafb 铺 `--brand-on`(#0f1115) 17:1。
+     · `--brand-text` 浅 #4868b2 在 `--brand-soft`(#edf3fe) 上 4.9:1。
    ========================================================================== */
 :root {
-  /* ---------- 品牌色 ---------- */
-  --brand: #2f8f6b;          /* 品牌主色：描边 / 圆点 / 渐变起点（非实底场景） */
-  --brand-solid: #25775a;    /* 实底填充色：白字对比度 5.4:1，铺 --brand-on 文字 */
-  --brand-bright: #3aa87e;   /* 渐变亮端 / 悬停提亮 */
-  --brand-deep: #1f6b4f;     /* 渐变暗端 */
-  --brand-on: #ffffff;       /* 铺在 --brand-solid 实底上的文字色 */
-  --brand-soft: #eef7f3;     /* 品牌浅底 */
-  --brand-text: #1f6349;     /* 品牌浅底上的文字：4.8:1 */
-  --brand-tint: #cfe7dd;     /* 品牌淡描边 */
-  /* 春绿渐变（亮暗主题共用：就是品牌本身的颜色） */
-  --brand-grad: linear-gradient(135deg, #3aa87e 0%, #1f6b4f 100%);
+  /* ---------- DSH 原始色板（static；深色那段只覆盖真正不同的一个值） ---------- */
+  --dsw-static-neutral-bluish-00: #fff;
+  --dsw-static-neutral-bluish-50: #f9fafb;
+  --dsw-static-neutral-bluish-60: #f5f6f7;
+  --dsw-static-neutral-bluish-75: #f1f3f5;
+  --dsw-static-neutral-bluish-100: #ebeef2;
+  --dsw-static-neutral-bluish-150: #e9ecf2;
+  --dsw-static-neutral-bluish-200: #e1e5ee;
+  --dsw-static-neutral-bluish-300: #cfd3d6;
+  --dsw-static-neutral-bluish-400: #adb2b8;
+  --dsw-static-neutral-bluish-500: #979da6;
+  --dsw-static-neutral-bluish-600: #81858c;
+  --dsw-static-neutral-bluish-700: #61666b;
+  --dsw-static-neutral-bluish-750: #43454a;
+  --dsw-static-neutral-bluish-800: #353638;
+  --dsw-static-neutral-bluish-850: #2c2c2e;
+  --dsw-static-neutral-bluish-875: #232324;
+  --dsw-static-neutral-bluish-900: #1b1b1c;
+  --dsw-static-neutral-bluish-950: #151517;
+  --dsw-static-neutral-bluish-1000: #0f1115;
+  --dsw-static-deepseek-50: #edf3fe;
+  --dsw-static-deepseek-100: #e4edfd;
+  --dsw-static-deepseek-200: #d3e2ff;
+  --dsw-static-deepseek-300: #b7c8fe;
+  --dsw-static-deepseek-400: #679efe;
+  --dsw-static-deepseek-450: #5686fe;
+  --dsw-static-deepseek-500: #4176e6;
+  --dsw-static-deepseek-600: #4868b2;
+  --dsw-static-deepseek-800: #34415b;
+  --dsw-static-red-50: #fef2f2;
+  --dsw-static-red-100: #fee2e2;
+  --dsw-static-red-400: #f25a5a;
+  --dsw-static-red-500: #ef4444;
+  --dsw-static-red-600: #ec1313;
+  --dsw-static-red-900: #570c0c;
+  --dsw-static-green-100: #e6faed;
+  --dsw-static-green-400: #4ed17e;
+  --dsw-static-green-500: #22c55e;
+  --dsw-static-green-900: #233c2c;
+  --dsw-static-amber-100: #fef5e7;
+  --dsw-static-amber-400: #f7ad31;
+  --dsw-static-amber-500: #f59e0b;
+  --dsw-static-amber-600: #dd8629;
+  --dsw-static-amber-900: #27241f;
+  /* DSH 的字体栈（逐字照抄；中文命中 PingFang SC / 微软雅黑，与原来一致） */
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* ---------- DSH 语义令牌（alias · 浅色） ---------- */
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-overlay: var(--dsw-static-neutral-bluish-150);
+  --dsw-alias-border-l1: #0000000a;
+  --dsw-alias-border-l2: #0000001a;
+  --dsw-alias-border-l3: #0000001f;
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-brand-primary-foreground: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-link: var(--dsw-static-deepseek-500);
+  --dsw-alias-interactive-bg-hover: #2631480f;
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-50);
+  --dsw-specific-bubble: var(--dsw-static-deepseek-50);
+  --dsw-specific-bubble-highlight: var(--dsw-static-deepseek-200);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-600);
+
+  /* ---------- 春晓品牌色 → DSH ---------- */
+  --brand: var(--dsw-static-deepseek-500);              /* 描边 / 圆点 / 渐变起点 */
+  --brand-solid: var(--dsw-alias-brand-primary);        /* 实底：DSH 的主按钮是近黑，白字 18:1 */
+  --brand-bright: var(--dsw-static-deepseek-400);
+  --brand-deep: var(--dsw-static-deepseek-600);
+  --brand-on: var(--dsw-alias-brand-primary-foreground);
+  --brand-soft: var(--dsw-static-deepseek-50);          /* 品牌浅底 */
+  --brand-text: var(--dsw-static-deepseek-600);         /* 浅底上的品牌文字 4.9:1 */
+  --brand-tint: var(--dsw-static-deepseek-100);         /* 淡描边 / 选中底 */
+  --brand-grad: linear-gradient(135deg, var(--dsw-static-deepseek-450) 0%, var(--dsw-static-deepseek-500) 100%);
   --brand-grad-on: #ffffff;
 
-  /* ---------- 语义色：深砖红，与品牌绿正交 ---------- */
-  --danger: #b3261e;
-  --danger-soft: #fdecea;
-  --danger-border: #f2c4c0;
+  /* ---------- 语义色（取 DSH 的 state-* 一族） ---------- */
+  --danger: var(--dsw-static-red-600);
+  --danger-soft: var(--dsw-static-red-50);
+  --danger-border: var(--dsw-static-red-100);
 
-  /* ---------- 提醒色：琥珀（"待核对 / 需注意"，不是错误）----------
-     原先 .tag-warn 把 #fff7e0 / #9a6b00 写死在规则里，暗色主题下会变成
-     浅黄底配浅字 —— 这里收回令牌层，两套主题各给一组。 */
-  --warn-soft: #fdf6e3;
-  --warn-border: #efe0b8;
-  --warn-text: #8a6207;
+  --warn-soft: var(--dsw-static-amber-100);             /* 「待核对 / 需注意」，不是错误 */
+  --warn-border: #f2dcb3;
+  --warn-text: var(--dsw-static-amber-600);
 
-  /* ---------- 中性色：克制的冷灰（只保留极淡绿意） ----------
-     R3 打磨：原先 #f3f8f5 / #e6ece9 绿味偏重，大面积铺开像"薄荷底色"，
-     观感偏轻飘、不够沉稳。这里把底色与描边收到接近中性的冷灰，
-     **绿色只留给强调与主操作** —— 同一套品牌色，用得更少才显得贵。 */
-  --surface: #ffffff;
-  --surface-muted: #f6f7f7;   /* 应用底色（原 #f3f8f5，去绿味） */
-  --surface-sunken: #eef0ef;  /* 更沉一档：内嵌区域 / 表头 / 代码块 */
-  --surface-hover: #f1f3f2;   /* 悬停底：与页面底色区分开，避免"hover 看不见" */
-  --border: #e7eae8;          /* 发丝级描边（原 #e6ece9，去绿味） */
-  --border-strong: #d5dad7;   /* 悬停 / 聚焦描边 */
-  --text: #16191b;            /* 近黑冷灰，比原 #141a17 更中性 */
-  --text-muted: #61696d;      /* 次要文字（对白底 5.6:1） */
-  --text-faint: #8b9498;      /* 三级文字：只用于元信息 / 时间戳 */
+  /* ---------- 中性色 → DSH 语义令牌 ---------- */
+  --surface: var(--dsw-alias-bg-layer-1);               /* 卡片 */
+  --surface-muted: var(--dsw-specific-sidebar-fill);    /* 页面底（DSH 侧栏色，比纯白低一档） */
+  --surface-sunken: var(--dsw-static-neutral-bluish-60);/* 内嵌区域 / 表头 / 代码块 */
+  --surface-hover: var(--dsw-static-neutral-bluish-75); /* 悬停底 */
+  --border: var(--dsw-alias-border-l2);                 /* 发丝级描边 */
+  --border-strong: var(--dsw-alias-border-l3);          /* 悬停 / 聚焦描边 */
+  --text: var(--dsw-alias-label-primary);
+  --text-muted: var(--dsw-alias-label-secondary);
+  --text-faint: var(--dsw-alias-label-tertiary);
 
   /* ---------- 精致化刻度（R2 视觉升级引入；旧代码继续用 --radius 也一致） ---------- */
   --radius: 10px;            /* 主圆角：8px → 10px，观感更现代，且所有 var(--radius) 同步 */
@@ -59,18 +134,17 @@
   --r-xl: 20px;
   --r-pill: 999px;
 
-  /* 层次：**多层叠加**的柔和阴影（单层大阴影会显脏），统一带绿调，
-     与品牌色同源 —— 这是"高级感"的主要来源，比加颜色更有效。
-     ⚠ 实测（截图目视）：最初那版太轻，白卡片浮在浅底上几乎看不出层次，
-     这里把第一层略加强、并加一点纵向扩散，让卡片"抬起来"。 */
-  --sh-1: 0 1px 2px rgba(20, 45, 35, 0.06), 0 4px 12px -4px rgba(20, 45, 35, 0.10);
-  --sh-2: 0 2px 4px rgba(20, 45, 35, 0.06), 0 8px 20px -8px rgba(20, 45, 35, 0.14);
-  --sh-3: 0 4px 8px rgba(20, 45, 35, 0.07), 0 20px 44px -14px rgba(20, 45, 35, 0.20);
+  /* 层次：DSH 的"抬起"主要靠**发丝描边 + 极浅阴影**（它的 elevation-stroke 就是 0.5px 描边），
+     而不是大投影 —— 大投影在 DSH 那套冷灰底上会显脏。这里保留多层叠加的写法，
+     只把色相从"品牌绿"换成 DSH 的中性墨色 #0f1115，并整体收轻一档。 */
+  --sh-1: 0 1px 2px rgba(15, 17, 21, 0.04), 0 4px 12px -4px rgba(15, 17, 21, 0.08);
+  --sh-2: 0 1px 3px rgba(15, 17, 21, 0.05), 0 8px 20px -8px rgba(15, 17, 21, 0.10);
+  --sh-3: 0 2px 6px rgba(15, 17, 21, 0.06), 0 20px 44px -14px rgba(15, 17, 21, 0.16);
 
   /* 发丝线：比 --border 更轻的存在感，用于大面积容器的分隔 */
-  --hairline: rgba(20, 45, 35, 0.07);
-  /* 焦点环（只给键盘聚焦用，鼠标点击不亮） */
-  --ring: 0 0 0 3px rgba(47, 143, 107, 0.22);
+  --hairline: var(--dsw-alias-border-l1);
+  /* 焦点环（只给键盘聚焦用，鼠标点击不亮）：DSH 品牌蓝 */
+  --ring: 0 0 0 3px rgba(86, 134, 254, 0.28);
   /* 动效：统一缓动，避免各处 ease 手调导致节奏不一致 */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --dur-fast: 120ms;
@@ -111,46 +185,67 @@
   --content-max: 1180px;
 
   /* 层次补充：内嵌凹陷感，与"抬起"的卡片形成对比 */
-  --sh-inset: inset 0 1px 2px rgba(20, 45, 35, 0.04);
+  --sh-inset: inset 0 1px 2px rgba(15, 17, 21, 0.04);
 
   font-size: 14px;
 }
 
-/* ---------- 夜间模式 ---------- */
+/* ---------- 夜间模式（DSH 深色那套；只覆盖 alias，中性令牌自动跟着变） ---------- */
 :root[data-theme="dark"] {
-  --brand: #4fc08d;          /* 暗底可读的亮春绿：配暗底 7.3:1 */
-  --brand-solid: #3aa87e;    /* 实底填充：配 --brand-on 深字 6.0:1 */
-  --brand-bright: #5fd3a1;
-  --brand-deep: #25775a;
-  --brand-on: #06231a;       /* 亮绿实底配深字，避免白字掉到 3.4:1 */
-  --brand-soft: #1e2f28;
-  --brand-text: #9fe3c2;
-  --brand-tint: #33544a;
+  /* 原始色板里深色**唯一不同的是这一个**（DSH 自己的 static 段就是这么写的） */
+  --dsw-static-neutral-bluish-60: #f9fafb;
 
-  --danger: #f2b8b5;
-  --danger-soft: rgba(179, 38, 30, 0.24);
-  --danger-border: rgba(242, 184, 181, 0.35);
+  /* ---------- DSH 语义令牌（alias · 深色，逐条覆盖） ---------- */
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-bg-overlay: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-border-l1: #ffffff0f;
+  --dsw-alias-border-l2: #ffffff1f;
+  --dsw-alias-border-l3: #ffffff29;
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-brand-primary-foreground: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-link: var(--dsw-static-deepseek-400);
+  --dsw-alias-interactive-bg-hover: #ffffff14;
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-900);
+  --dsw-specific-bubble: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-bubble-highlight: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-400);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-400);
 
-  --warn-soft: rgba(214, 158, 46, 0.16);
-  --warn-border: rgba(224, 179, 84, 0.32);
-  --warn-text: #e8c37a;
+  /* ---------- 春晓品牌色 → DSH（暗底用亮一档的蓝，与 DSH 的 link 同值） ---------- */
+  --brand: var(--dsw-static-deepseek-450);
+  --brand-solid: var(--dsw-alias-brand-primary);        /* 暗色下 DSH 的主按钮是**白**的 */
+  --brand-bright: var(--dsw-static-deepseek-300);
+  --brand-deep: var(--dsw-static-deepseek-500);
+  --brand-on: var(--dsw-alias-brand-primary-foreground);
+  --brand-soft: var(--dsw-static-deepseek-800);
+  --brand-text: var(--dsw-static-deepseek-300);
+  --brand-tint: var(--dsw-static-deepseek-800);
+  --brand-grad: linear-gradient(135deg, var(--dsw-static-deepseek-400) 0%, var(--dsw-static-deepseek-600) 100%);
+  --brand-grad-on: #ffffff;
 
-  --surface: #14181a;         /* 卡片底：比页面底色亮一档，层次靠"亮"而不是靠描边 */
-  --surface-muted: #0e1113;   /* 页面底 */
-  --surface-sunken: #1b2023;  /* 内嵌区域 / 表头 */
-  --surface-hover: #1e2427;   /* 悬停底 */
-  --border: #262d30;
-  --border-strong: #384246;
-  --text: #e9eded;
-  --text-muted: #9aa4a8;
-  --text-faint: #78848a;
+  --danger: var(--dsw-static-red-400);
+  --danger-soft: rgba(242, 90, 90, 0.18);
+  --danger-border: rgba(242, 90, 90, 0.34);
+
+  --warn-soft: rgba(245, 158, 11, 0.16);
+  --warn-border: rgba(247, 173, 49, 0.32);
+  --warn-text: var(--dsw-static-amber-400);
+
+  /* ⚠ 中性色（`--surface*` / `--text*` / `--border*` / `--hairline`）**不用在这里重写**：
+     它们指向的是上面的 `--dsw-alias-*`，而 alias 已经换过一套了 —— 这正是分层的目的。 */
 
   /* 暗色下的层次与发丝线：亮色那套在暗底会"糊"，必须单独给值 */
   --sh-1: 0 1px 2px rgba(0, 0, 0, 0.32);
   --sh-2: 0 2px 4px rgba(0, 0, 0, 0.30), 0 6px 16px -6px rgba(0, 0, 0, 0.45);
   --sh-3: 0 4px 8px rgba(0, 0, 0, 0.32), 0 18px 40px -12px rgba(0, 0, 0, 0.55);
-  --hairline: rgba(255, 255, 255, 0.07);
-  --ring: 0 0 0 3px rgba(79, 192, 141, 0.28);
+  --ring: 0 0 0 3px rgba(86, 134, 254, 0.34);
   --sh-inset: inset 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
@@ -162,13 +257,6 @@
 
 :root[data-theme="dark"] .danger-btn:hover {
   background: rgba(179, 38, 30, 0.38);
-}
-
-/* 暗色下的"晨光"要更亮一点才看得见（亮色那层 0.07 在暗底几乎不可见） */
-:root[data-theme="dark"] .content {
-  background:
-    radial-gradient(1100px 420px at 78% -16%, rgba(79, 192, 141, 0.09), transparent 72%),
-    var(--surface-muted);
 }
 
 :root[data-theme="dark"] input,
@@ -190,7 +278,8 @@ body,
 }
 
 body {
-  font-family: "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* R10：字体栈换成 DSH 的 `--dsw-font-family`（逐字照抄它的顺序，中文命中一致） */
+  font-family: var(--dsw-font-family);
   font-size: var(--fs-base);
   /* 中文正文行高 1.6：1.5 偏紧，长段落读起来发闷 */
   line-height: var(--lh-base);
@@ -240,13 +329,14 @@ h4 {
 .content {
   flex: 1;
   overflow: auto;
-  padding: var(--sp-7) var(--sp-8) var(--sp-9);
-  /* 顶部一抹"晨光"：呼应「春晓」，也让大面积底色不再是一块死板的灰。
-     纯 CSS 径向渐变，零图片、零请求。
-     R3 打磨：把透明度从 0.07 降到 0.055 —— 底色一浓就显廉价，"贵"来自留白与层次。 */
-  background:
-    radial-gradient(1200px 420px at 78% -16%, rgba(69, 190, 140, 0.055), transparent 70%),
-    var(--surface-muted);
+  /* R6：内边距收窄（原 sp-7/sp-8/sp-9 ≈ 32/40/40）。
+     实测对话页：内容区 700px 里有 88px 是内边距，消息区因此只剩 190px ——
+     "对话内容显示不全"有一半是这里吃掉的。 */
+  padding: var(--sp-5) var(--sp-6) var(--sp-6);
+  /* R10：**背景换成 DSH 的底色**（`--dsw-specific-sidebar-fill`：浅 #f9fafb / 深 #1b1b1c）。
+     原来那层"晨光"径向渐变（春绿）随主题一起退役 —— DSH 的界面是**平色 + 层次靠描边**，
+     底色再叠一层光就会与卡片的白打架。 */
+  background: var(--surface-muted);
 }
 
 /* 版心：挂在 .content 下的视图根节点统一限宽居中。
@@ -274,19 +364,26 @@ h4 {
   border-bottom: 1px solid var(--hairline);
 }
 
-/* 品牌标记 = **迷你 App 图标**：装的就是吉祥物母版，与 exe / favicon 天然同一形象 */
+/* 品牌标记 = **迷你 App 图标**：装的就是形象母版（R10 起是 DSH 鲸鱼），与 exe / favicon 同一形象 */
 .brand-mark {
   width: 34px;
   height: 34px;
   border-radius: var(--r-md);
-  /* 复用品牌春绿渐变，呼应「晨光 → 林荫」的设计理念 */
-  background: var(--brand-grad);
+  /* R10：底盘换成 **DSH 近黑**（`--dsw-static-neutral-bluish-1000` #0f1115）。
+     原来铺的是品牌渐变，而形象现在也是蓝色系 —— 蓝鲸落在蓝底上会糊成一团；
+     改用近黑底盘后，这一小块与 `scripts/make-icons.ps1` 产出的 **App 图标完全同构**。 */
+  background: var(--dsw-static-neutral-bluish-1000);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   /* 内高光 + 外阴影：给这块小瓷砖"玻璃感" */
-  box-shadow: var(--sh-2), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: var(--sh-2), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+/* 暗色主题下近黑底盘会与侧栏糊在一起 → 抬到 layer-1 那一档（#232324），蓝鲸照样清楚 */
+:root[data-theme="dark"] .brand-mark {
+  background: var(--dsw-static-neutral-bluish-875);
 }
 
 .brand-mark img {
@@ -321,6 +418,50 @@ h4 {
   flex-direction: column;
   gap: var(--sp-1);
   overflow-y: auto;
+}
+
+/* ---------- R6：课程选择器（侧栏入口） ---------- */
+/* 导航改成"课程优先"之后，这个下拉就是整条侧栏的入口：
+   选了哪门课，下面列的就是那门课的功能。 */
+.course-picker {
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+}
+
+.course-picker select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+  cursor: pointer;
+}
+
+.course-picker select:hover {
+  border-color: var(--border-strong);
+}
+
+.course-picker select:focus {
+  border-color: var(--brand);
+}
+
+/* 顶栏的「当前课程」胶囊：导航改成课程优先后，"我在哪门课里"必须始终可见 */
+.course-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 分组容器：每组内部自己排布，组与组之间由 .nav 的 gap 分开 */
@@ -654,8 +795,9 @@ button.primary {
   padding: 9px 18px;
   border: none;
   border-radius: var(--r-md);
-  /* ⚠ 实底必须用 --brand-solid：白字 5.4:1（令牌区已实测登记）。
-     **不要**为了"高级"换成 --brand-grad：渐变亮端 #3aa87e 配白字只有约 3:1，
+  /* ⚠ 实底必须用 --brand-solid：DSH 的主按钮是**单色**的（浅 #0f1115 / 深 #f9fafb），
+     对比度 18:1 / 17:1（令牌区已登记）。
+     **不要**为了"高级"换成 --brand-grad：渐变亮端 #5686fe 配白字只有约 3.3:1，
      会把既有的对比度口径弄坏。厚度感用"内高光 + 多层阴影"来做。 */
   background: var(--brand-solid);
   color: var(--brand-on);
@@ -847,6 +989,25 @@ button.danger-btn:hover {
 .chip:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* R5：悬浮球来源的会话徽标。
+   用途是**让来源一眼可辨** —— 打开「含悬浮球记录」后，列表里混着两种来源，
+   光看标题分不清哪条是在悬浮球里问的。 */
+.chip-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  flex: 0 0 auto;
 }
 
 /* ---------- 标签 / 徽标 ---------- */
@@ -1093,7 +1254,7 @@ button.danger-btn:hover {
   border: 1px solid var(--hairline);
   border-radius: var(--r-xl);
   background:
-    radial-gradient(620px 220px at 88% -40%, rgba(69, 190, 140, 0.10), transparent 70%),
+    radial-gradient(620px 220px at 88% -40%, rgba(86, 134, 254, 0.10), transparent 70%),
     var(--surface);
   box-shadow: var(--sh-1);
 }
@@ -1647,8 +1808,11 @@ button.primary.danger:hover {
 }
 
 .msg.user .msg-bubble {
-  background: var(--brand-solid);
-  color: var(--brand-on);
+  /* R10：用户气泡改用 **DSH 的对话气泡色**（`--dsw-specific-bubble`：浅 #edf3fe / 深 #2c2c2e）——
+     DSH 的用户消息是**淡色底 + 常规文字**，不是实心主色块；
+     原来那版把 `--brand-solid` 直接铺上，换到 DSH 令牌后就成了"近黑大色块"，不像 DSH。 */
+  background: var(--dsw-specific-bubble);
+  color: var(--text);
   border-bottom-right-radius: 4px;
 }
 
@@ -1658,17 +1822,20 @@ button.primary.danger:hover {
   border-bottom-left-radius: 4px;
 }
 
-/* ---------- AI 回复 Markdown 渲染 ---------- */
-.msg-bubble .md-p,
-.msg-bubble .md-h2,
-.msg-bubble .md-h3,
-.msg-bubble .md-h4,
-.msg-bubble .md-list {
+/* ---------- AI 回复的 Markdown 渲染（R7：关掉旧债 T28） ----------
+   R6 之前这里只有几条**预留**规则，而且是照着"想象出来的类名"写的：
+   `md-code` 并不存在（渲染器产出的是 `md-pre`），`.md-list` 是渲染器产出的 `<ul>/<ol>`
+   本体（外面还有一层 `.md-list-wrap`），标题类名是 `md-heading md-h1..h6`（这里只覆盖了 h2/h3/h4）。
+   结果就是气泡里 `<div>{内容}</div>` 一直是**纯文本**，模型返回的 `#`、`-`、`**` 原样显示。
+   现在整块按渲染器**真实产出**的类名重写，并补上 `.md-body` 的 `white-space` 复位
+   —— 气泡是 `pre-wrap`（用户消息要保留换行），不复位的话 Markdown 源码里的换行会漏到正文里。 */
+.msg-bubble .md-body {
   white-space: normal;
 }
 
 .msg-bubble .md-p {
   margin: 6px 0;
+  word-break: break-word;
 }
 
 .msg-bubble .md-p:first-child {
@@ -1679,38 +1846,125 @@ button.primary.danger:hover {
   margin-bottom: 0;
 }
 
-.msg-bubble .md-h2,
-.msg-bubble .md-h3,
-.msg-bubble .md-h4 {
-  margin: 10px 0 6px;
+.msg-bubble .md-heading {
+  margin: 12px 0 6px;
   line-height: 1.4;
+  font-weight: 700;
+}
+
+.msg-bubble .md-body > .md-heading:first-child,
+.msg-bubble .md-body > .md-list-wrap:first-child,
+.msg-bubble .md-body > .md-pre:first-child {
+  margin-top: 0;
+}
+
+/* 气泡里字号整体比笔记正文小一档：一屏能多看到两行，且不与 14px 的段落抢视线 */
+.msg-bubble .md-h1 {
+  font-size: 17px;
+}
+
+.msg-bubble .md-h2 {
+  font-size: 16px;
+  color: var(--brand-text);
+}
+
+.msg-bubble .md-h3 {
+  font-size: 15px;
+}
+
+.msg-bubble .md-h4,
+.msg-bubble .md-h5,
+.msg-bubble .md-h6 {
+  font-size: 14px;
+}
+
+.msg-bubble .md-list-wrap {
+  margin: 6px 0;
 }
 
 .msg-bubble .md-list {
-  margin: 6px 0;
+  margin: 0;
   padding-left: 20px;
+}
+
+.msg-bubble .md-list .md-list {
+  margin: 3px 0 0;
 }
 
 .msg-bubble .md-list li {
   margin: 3px 0;
 }
 
-.msg-bubble .md-code {
-  display: block;
-  background: rgba(0, 0, 0, 0.06);
-  border-radius: var(--r-xs);
-  padding: 8px 10px;
-  overflow-x: auto;
-  font-size: 12.5px;
-  white-space: pre;
-  margin: 6px 0;
+.msg-bubble .md-inline-code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.07);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  font-size: 0.92em;
 }
 
-.msg-bubble .md-inline-code {
-  background: rgba(0, 0, 0, 0.07);
-  border-radius: 4px;
-  padding: 1px 5px;
+.msg-bubble .md-pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, 0.06);
+  overflow-x: auto;
   font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.msg-bubble .md-pre code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  white-space: pre;
+}
+
+.msg-bubble .md-quote {
+  margin: 6px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--brand-tint);
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  color: var(--text-muted);
+}
+
+.msg-bubble .md-quote p {
+  margin: 0;
+}
+
+.msg-bubble .md-hr {
+  margin: 8px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* 表格在气泡里必然超宽 —— 只让**表格自己**横向滚，不把整个消息区撑出横向滚动条 */
+.msg-bubble .md-table-wrap {
+  margin: 6px 0;
+  overflow-x: auto;
+}
+
+.msg-bubble .md-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.msg-bubble .md-table th,
+.msg-bubble .md-table td {
+  border: 1px solid var(--border-strong);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.msg-bubble .md-table th {
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+
+.msg-bubble .md-link {
+  color: var(--brand-text);
+  text-decoration: underline;
+  word-break: break-all;
 }
 
 .assistant-input {
@@ -1721,6 +1975,11 @@ button.primary.danger:hover {
 }
 
 .assistant-input textarea {
+  /* ⚠ R7：必须显式给宽度。`<textarea>` 不给 `width` 时宽度由 `cols` 属性决定
+     （默认 20 个字符宽 ≈ 190px）—— 它被 `.assistant-drop` 这个普通 block 包着，
+     不像 flex 子项那样自动拉伸，于是输入框比上面的消息区窄一大截（用户实测反馈）。
+     与消息区同宽：两者都是 `.assistant-page`（flex column）的子项，撑满同一容器。 */
+  width: 100%;
   resize: none;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -2488,9 +2747,9 @@ select { -webkit-user-select: none; user-select: none; }
 }
 
 :root[data-theme="dark"] .src-badge.src-ok {
-  background: rgba(46, 125, 50, 0.22);
-  border-color: rgba(191, 227, 203, 0.32);
-  color: #9fe3c2;
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(78, 209, 126, 0.32);
+  color: var(--dsw-static-green-400);
 }
 
 /* ---------- 演示模式横幅（未配置 Key 时的诚实提示） ---------- */
@@ -2618,9 +2877,9 @@ select { -webkit-user-select: none; user-select: none; }
 }
 
 :root[data-theme="dark"] .import-report {
-  background: rgba(46, 125, 50, 0.18);
-  border-color: rgba(191, 227, 203, 0.32);
-  color: #9fe3c2;
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(78, 209, 126, 0.32);
+  color: var(--dsw-static-green-400);
 }
 
 :root[data-theme="dark"] .import-report.has-fail {
@@ -2642,6 +2901,33 @@ select { -webkit-user-select: none; user-select: none; }
 }
 
 /* ---------- 对话：检索开关 ---------- */
+/* R6：模式 + 「先查材料」+ 检索范围**合并成一行**。
+   原来分成两行（模式一行、开关一行 + 一句 modeHint），实测把消息区挤到只剩 190px。
+   检索范围仍可见（契约要求），只是不再单独占一行 —— 过长时省略号 + 悬停看全文。 */
+.assistant-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.assistant-controls .mode-chips {
+  flex: 0 0 auto;
+}
+
+.assistant-controls .mat-toggle {
+  flex: 0 0 auto;
+}
+
+.assistant-controls .mat-scope {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mat-toggle-row {
   display: flex;
   align-items: center;
@@ -3029,8 +3315,8 @@ select:focus-visible {
   height: 96px;
   flex-shrink: 0;
   object-fit: contain;
-  /* 极淡的落地感：让形象不像"贴"在背景上 */
-  filter: drop-shadow(0 6px 12px rgba(20, 45, 35, 0.12));
+  /* 极淡的落地感：让形象不像"贴"在背景上（R10：色相并入 DSH 的中性墨色） */
+  filter: drop-shadow(0 6px 12px rgba(15, 17, 21, 0.12));
 }
 
 /* 对话页空态：作为主视觉居中 */
@@ -3040,7 +3326,7 @@ select:focus-visible {
   display: block;
   margin: 0 auto 10px;
   object-fit: contain;
-  filter: drop-shadow(0 10px 20px rgba(20, 45, 35, 0.13));
+  filter: drop-shadow(0 10px 20px rgba(15, 17, 21, 0.13));
 }
 
 /* ---------- 链接色（修一个既有缺陷） ---------- */
@@ -3229,3 +3515,282 @@ a:hover {
   }
 }
 
+
+/* ==========================================================================
+   R11 · 「DeepSeek 云鲸纸面」主题层
+   来源：DSH 皮肤 `maid-whale-webui`（作者 yunxi，BSD-3-Clause）——
+   令牌值逐条照抄它的 `deepseek-workshop.module.css`（浅/深两套），
+   叠在上面的 DSH 基座**之上**（同名令牌后写覆盖，所以组件 CSS 依然一行不用改）。
+
+   皮肤的四条签名特征（都保留）：
+     · **云鲸纸面**：暮蓝纸面（深）/ 纸白（浅）+ 淡天蓝强调 #5aa7d8；
+     · **背景图**：云鲸女仆插画（`bg-cloud-whale-maid.webp`）+ 雾色叠加；
+     · **侧栏海浪**（`bg-sidebar-ocean.webp`）+ 页边女仆形象（`mascot-maid.webp`）；
+     · **手绘感圆角**：四角不相等（13px 16px 12px 15px 这类），来自皮肤原文。
+
+   ⚠ **一处刻意偏离皮肤**（如实登记）：皮肤的主按钮是 `#5aa7d8` + 白字（约 2.6:1），
+     对春晓"实底必须够对比度"的既有口径偏冒险。这里把 **实底** 取到
+     `--dsw-static-blue-800`（浅 `#315d78`，白字 7.3:1）/ 深 `#5f9fc5`（配深字 8.4:1），
+     亮天蓝仍用于描边、强调与渐变 —— 观感一致，对比度回到安全线。
+   ========================================================================== */
+:root {
+  /* ---- 皮肤色板（浅色）---- */
+  --dsw-static-blue-50: #f2f8fa;
+  --dsw-static-blue-100: #deeff4;
+  --dsw-static-blue-300: #a8d1df;
+  --dsw-static-blue-400: #7fb9d0;
+  --dsw-static-blue-450: #69acc8;
+  --dsw-static-blue-500: #5aa7d8;
+  --dsw-static-blue-600: #438db8;
+  --dsw-static-blue-800: #315d78;
+  --dsw-static-blue-950: #243746;
+  --dsw-static-deepseek-50: #f2f8fa;
+  --dsw-static-deepseek-100: #deeff4;
+  --dsw-static-deepseek-200: #c9e4ec;
+  --dsw-static-deepseek-300: #a8d1df;
+  --dsw-static-deepseek-400: #7fb9d0;
+  --dsw-static-deepseek-450: #69acc8;
+  --dsw-static-deepseek-500: #5aa7d8;
+  --dsw-static-deepseek-600: #438db8;
+  --dsw-static-deepseek-800: #315d78;
+  --dsw-static-deepseek-900: #294a60;
+  --dsw-static-neutral-bluish-00: #fffef9;
+  --dsw-static-neutral-bluish-50: #fbfaf5;
+  --dsw-static-neutral-bluish-60: #f3f3ed;
+  --dsw-static-neutral-bluish-75: #edf5f6;
+  --dsw-static-neutral-bluish-100: #f3f3ed;
+  --dsw-static-neutral-bluish-150: #e4e8e4;
+  --dsw-static-neutral-bluish-200: #e4e8e4;
+  --dsw-static-neutral-bluish-300: #ccd5d2;
+  --dsw-static-neutral-bluish-400: #aebdba;
+  --dsw-static-neutral-bluish-500: #8d9f9d;
+  --dsw-static-neutral-bluish-600: #697f80;
+  --dsw-static-neutral-bluish-700: #536b6f;
+  --dsw-static-neutral-bluish-750: #40565d;
+  --dsw-static-neutral-bluish-800: #40565d;
+  --dsw-static-neutral-bluish-850: #2d4049;
+  --dsw-static-neutral-bluish-875: #2d4049;
+  --dsw-static-neutral-bluish-900: #2d4049;
+  --dsw-static-neutral-bluish-950: #243746;
+  --dsw-static-neutral-bluish-1000: #243746;
+
+  /* ---- 皮肤语义令牌（浅色）---- */
+  --dsw-alias-bg-base: rgba(251, 250, 245, 0.28);
+  --dsw-alias-bg-layer-1: rgba(247, 249, 246, 0.97);
+  --dsw-alias-bg-layer-2: rgba(239, 246, 247, 0.98);
+  --dsw-alias-bg-layer-3: rgba(230, 241, 244, 0.98);
+  --dsw-alias-bg-overlay: rgba(255, 254, 249, 0.99);
+  --dsw-alias-brand-primary: #315d78;          /* 见文件头的"刻意偏离"说明 */
+  --dsw-alias-brand-primary-foreground: #fffef9;
+  --dsw-alias-brand-text: #315d78;
+  --dsw-alias-label-primary: #243746;
+  --dsw-alias-label-secondary: #486170;
+  --dsw-alias-label-tertiary: #718692;
+  --dsw-alias-border-l1: rgba(72, 112, 132, 0.14);
+  --dsw-alias-border-l2: rgba(72, 112, 132, 0.22);
+  --dsw-alias-border-l3: rgba(72, 112, 132, 0.32);
+  --dsw-alias-link: #438db8;
+  --dsw-specific-sidebar-fill: rgba(246, 249, 247, 0.36);
+  --dsw-specific-bubble: #e4f1f4;
+
+  /* ---- 春晓自己的令牌（跟着皮肤的 alias 走）---- */
+  --brand: #5aa7d8;
+  --brand-solid: var(--dsw-alias-brand-primary);
+  --brand-bright: var(--dsw-static-blue-400);
+  --brand-deep: var(--dsw-static-blue-800);
+  --brand-on: var(--dsw-alias-brand-primary-foreground);
+  --brand-soft: #e4f1f4;
+  --brand-text: var(--dsw-static-blue-800);
+  --brand-tint: #d2e8ee;
+  --brand-grad: linear-gradient(135deg, #7fb9d0 0%, #438db8 100%);
+  --ring: 0 0 0 3px rgba(90, 167, 216, 0.28);
+  --sh-1: 0 1px 2px rgba(49, 93, 120, 0.07), 0 4px 12px -4px rgba(49, 93, 120, 0.10);
+  --sh-2: 0 1px 3px rgba(49, 93, 120, 0.08), 0 8px 20px -8px rgba(49, 93, 120, 0.12);
+  --sh-3: 0 2px 6px rgba(49, 93, 120, 0.09), 0 20px 44px -14px rgba(49, 93, 120, 0.18);
+
+  /* ---- 背景图的叠法（逐字照抄皮肤的 setBackdrop）---- */
+  --bg-haze: linear-gradient(rgba(255, 254, 249, 0.60), rgba(255, 254, 249, 0.60));
+  --bg-paper:
+    radial-gradient(circle at 14% 18%, rgba(154, 211, 235, 0.34), transparent 28%),
+    radial-gradient(circle at 82% 8%, rgba(220, 238, 246, 0.72), transparent 24%),
+    linear-gradient(148deg, #fbfaf5 0%, #eef6f8 48%, #e2f0f5 100%);
+}
+
+:root[data-theme="dark"] {
+  /* ---- 皮肤色板（深色）---- */
+  --dsw-static-blue-50: #1c2d42;
+  --dsw-static-blue-100: #263b53;
+  --dsw-static-blue-300: #3f6380;
+  --dsw-static-blue-400: #527e9d;
+  --dsw-static-blue-450: #6090ae;
+  --dsw-static-blue-500: #6ea3c2;
+  --dsw-static-blue-600: #83bcdc;
+  --dsw-static-blue-800: #b9d9ea;
+  --dsw-static-blue-950: #e4edf2;
+  --dsw-static-deepseek-50: #1c2d42;
+  --dsw-static-deepseek-100: #263b53;
+  --dsw-static-deepseek-200: #2e465f;
+  --dsw-static-deepseek-300: #3f6380;
+  --dsw-static-deepseek-400: #527e9d;
+  --dsw-static-deepseek-450: #6090ae;
+  --dsw-static-deepseek-500: #6ea3c2;
+  --dsw-static-deepseek-600: #83bcdc;
+  --dsw-static-deepseek-800: #b9d9ea;
+  --dsw-static-deepseek-900: #d1e6f0;
+  --dsw-static-neutral-bluish-00: #172435;
+  --dsw-static-neutral-bluish-50: #1c2d42;
+  --dsw-static-neutral-bluish-60: #1c2d42;
+  --dsw-static-neutral-bluish-75: #253b53;
+  --dsw-static-neutral-bluish-100: #22384f;
+  --dsw-static-neutral-bluish-150: #22384f;
+  --dsw-static-neutral-bluish-200: #30485f;
+  --dsw-static-neutral-bluish-300: #425c73;
+  --dsw-static-neutral-bluish-400: #566f84;
+  --dsw-static-neutral-bluish-500: #6e8496;
+  --dsw-static-neutral-bluish-600: #8a9dab;
+  --dsw-static-neutral-bluish-700: #a2b1bc;
+  --dsw-static-neutral-bluish-750: #b9c8d2;
+  --dsw-static-neutral-bluish-800: #b9c8d2;
+  --dsw-static-neutral-bluish-850: #d5e0e6;
+  --dsw-static-neutral-bluish-875: #d5e0e6;
+  --dsw-static-neutral-bluish-900: #d5e0e6;
+  --dsw-static-neutral-bluish-950: #e4edf2;
+  --dsw-static-neutral-bluish-1000: #e4edf2;
+
+  /* ---- 皮肤语义令牌（深色）---- */
+  --dsw-alias-bg-base: rgba(23, 36, 53, 0.34);
+  --dsw-alias-bg-layer-1: rgba(28, 45, 66, 0.98);
+  --dsw-alias-bg-layer-2: rgba(34, 56, 79, 0.98);
+  --dsw-alias-bg-layer-3: rgba(41, 66, 91, 0.98);
+  --dsw-alias-bg-overlay: rgba(28, 45, 66, 0.99);
+  --dsw-alias-brand-primary: #5f9fc5;
+  --dsw-alias-brand-primary-foreground: #172435;
+  --dsw-alias-brand-text: #b9d9ea;
+  --dsw-alias-label-primary: #e4edf2;
+  --dsw-alias-label-secondary: #b9c8d2;
+  --dsw-alias-label-tertiary: #8fa4b2;
+  --dsw-alias-border-l1: rgba(167, 199, 216, 0.12);
+  --dsw-alias-border-l2: rgba(167, 199, 216, 0.18);
+  --dsw-alias-border-l3: rgba(167, 199, 216, 0.26);
+  --dsw-alias-link: #83bcdc;
+  --dsw-specific-sidebar-fill: rgba(28, 45, 66, 0.48);
+  --dsw-specific-bubble: #29465f;
+
+  --brand: #6ea3c2;
+  --brand-solid: var(--dsw-alias-brand-primary);
+  --brand-bright: #83bcdc;
+  --brand-deep: #527e9d;
+  --brand-on: var(--dsw-alias-brand-primary-foreground);
+  --brand-soft: #263b53;
+  --brand-text: #b9d9ea;
+  --brand-tint: #31536e;
+  --brand-grad: linear-gradient(135deg, #6090ae 0%, #3f6380 100%);
+  --ring: 0 0 0 3px rgba(131, 188, 220, 0.32);
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --sh-2: 0 2px 4px rgba(0, 0, 0, 0.26), 0 6px 16px -6px rgba(0, 0, 0, 0.40);
+  --sh-3: 0 4px 8px rgba(0, 0, 0, 0.28), 0 18px 40px -12px rgba(0, 0, 0, 0.50);
+
+  --bg-haze: linear-gradient(rgba(18, 31, 47, 0.52), rgba(18, 31, 47, 0.52));
+  --bg-paper:
+    radial-gradient(circle at 16% 20%, rgba(96, 151, 184, 0.22), transparent 30%),
+    radial-gradient(circle at 84% 10%, rgba(80, 118, 153, 0.16), transparent 26%),
+    linear-gradient(148deg, #172435 0%, #1c2d42 52%, #22384f 100%);
+}
+
+/* ---------------- 背景图：雾色 + 纸面 + 云鲸女仆插画（固定，随窗口不滚动） ---------------- */
+body {
+  background-color: #eef6f8;
+  background-image: var(--bg-haze), url("./assets/bg-cloud-whale-maid.webp"), var(--bg-paper);
+  background-size: cover, cover, cover;
+  background-position: center, calc(50% + 60px) calc(100% - 40px), center;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+:root[data-theme="dark"] body {
+  background-color: #172435;
+}
+
+/* 应用外壳与内容区都透明，让背景图透上来；**卡片保持不透明**（可读性优先） */
+.layout,
+.main,
+.content {
+  background: transparent;
+}
+
+/* ---------------- 侧栏：海浪背景 + 半透明填充 ---------------- */
+.sidebar {
+  position: relative;
+  background-color: var(--dsw-specific-sidebar-fill);
+  background-image: url("./assets/bg-sidebar-ocean.webp");
+  background-position: center bottom;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+/* 页边女仆形象（皮肤原文：固定在左缘底部，148×160，不响应鼠标） */
+.sidebar-mascot {
+  position: absolute;
+  left: 12px;
+  bottom: 44px;
+  width: 148px;
+  height: 160px;
+  object-fit: contain;
+  object-position: center bottom;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 8px 10px rgba(49, 93, 120, 0.16));
+}
+
+/* ---------------- 手绘感圆角（四角不等，皮肤原文的做法） ---------------- */
+.card,
+.pf-block,
+.qs-block {
+  border-radius: 19px 22px 18px 21px;
+}
+
+button,
+.btn,
+.chip {
+  border-radius: 12px 14px 11px 13px;
+}
+
+.msg-bubble {
+  border-radius: 21px 24px 19px 23px;
+}
+
+.msg.user .msg-bubble {
+  border-radius: 20px 23px 18px 22px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  border-radius: 14px 17px 13px 16px;
+}
+/* 女仆形象占住侧栏底部：给侧栏留出她的高度，避免她盖住「专注计时 / 数据设置」两行。
+   （皮肤原文是铺在工作区空白处；春晓侧栏更窄，必须让位，否则文字被压在图下。） */
+.sidebar {
+  padding-bottom: 168px;
+}
+
+.sidebar-foot {
+  position: relative;
+  z-index: 2;
+}
+
+/* 副标题与品牌名在图上也要清楚 */
+.brand,
+.nav,
+.sidebar-foot {
+  position: relative;
+  z-index: 2;
+}
+/* 页脚与女仆形象之间再留一点余地（目视：原来她的头顶几乎贴到页脚那行字） */
+.sidebar {
+  padding-bottom: 182px;
+}
+
+.sidebar-mascot {
+  bottom: 50px;
+}
