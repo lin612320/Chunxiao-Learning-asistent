@@ -1,7 +1,7 @@
 {
   "name": "chunxiao-ball",
-  "version": "1.0.3",
-  "description": "春晓桌宠 · 桌面悬浮球 —— 选中文字即可讲解 / 查课程材料 / 询问 AI",
+  "version": "1.0.4",
+  "description": "春晓桌宠 · 桌面悬浮球 —— 选中文字即可查课程材料 / 粘贴截图问 AI（R4：移除翻译）",
   "main": "src/main/main.js",
   "author": "",
   "license": "MIT",

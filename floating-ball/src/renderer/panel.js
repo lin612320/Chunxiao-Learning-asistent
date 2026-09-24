@@ -86,7 +86,7 @@ function renderResult(appendCursor) {
 }
 function setStatus(t) { $('status').textContent = t || ''; }
 function setRunning(v) {
-  running = v; ['btnTranslate','btnAsk'].forEach((id) => ($(id).disabled = v));
+  running = v; ['btnAsk', 'btnRelate'].forEach((id) => { const el = $(id); if (el) el.disabled = v; });
   updateResultButtons();
 }
 /** 结果区按钮态：空闲时不显示停止；无结果时隐藏复制/清空，避免输入区上方常驻一排图标 */
@@ -107,7 +107,21 @@ function startTask(kind, opts) {
 window.api.onTaskChunk(({ id, chunk }) => { if (id !== taskId) return; buffer += chunk; renderResult(true); });
 window.api.onTaskDone(({ id, aborted }) => {
   if (id !== taskId) return;
-  setRunning(false); setStatus(aborted ? '已停止' : '完成'); renderResult(false);
+  setRunning(false); renderResult(false);
+  setStatus(aborted ? '已停止' : '完成');
+  // R4：把「问题 + 回答 + 图片」回推给主程序落库。
+  //   球是**独立应用**：用户可能压根没开主程序界面，所以这件事不能依赖任何页面在跑 ——
+  //   主程序侧由桥接轮询线程直接写库（ball.rs → db::ball_append_qa）。
+  const ask = pendingAsk;
+  pendingAsk = null;
+  if (ask && !aborted && buffer.trim()) {
+    void window.api
+      .pushAsk({ text: ask.question, answer: buffer, images: ask.images })
+      .then((r) => {
+        if (r && r.ok) setStatus('完成 · 已存进春晓');
+        else setStatus('完成（存进春晓失败：' + ((r && r.error) || '未知') + '）');
+      });
+  }
 });
 window.api.onTaskError(({ id, message }) => {
   if (id !== taskId) return;
@@ -191,54 +205,195 @@ window.api.onMaterialResult((msg) => {
 window.api.onExternalRunTask(({ kind, opts }) => {
   const text = opts.text || opts.question || '';
   if (text) $('source').value = text;
-  if (kind === 'translate' && opts.target) $('lang').value = opts.target;
   if (kind === 'relate') showRelatePlaceholder(opts.text);
   else startTask(kind, opts);
 });
 
-// ---- 按钮事件 ----
-$('btnTranslate').addEventListener('click', () => {
-  const text = $('source').value.trim();
-  if (!text) { setStatus('请先输入/抓取文本'); return; }
-  startTask('translate', { text, target: $('lang').value });
+// R4：课程列表 / 当前课程由主程序下发（随 show / prefill 一起给）
+window.api.onCourses((p) => {
+  courses = Array.isArray(p && p.courses) ? p.courses : [];
+  courseId = p && p.courseId != null ? p.courseId : null;
+  renderCourses();
 });
 
+// ---- R4：课程上下文（R1 阶段 2）----
+// 课程列表与当前选择由**主程序**下发（单一事实来源在库侧 settings.ball.course_id）；
+// 这里只负责显示与回写。没选过就是"不限定课程" —— 不自动套用"最近课程"。
+let courses = [];
+let courseId = null;
+
+function renderCourses() {
+  const sel = $('courseSel');
+  if (!sel) return;
+  const wanted = courseId == null ? '' : String(courseId);
+  sel.innerHTML =
+    '<option value="">不限定课程</option>' +
+    courses.map((c) => `<option value="${c.id}">${escapeHtml(String(c.name || ''))}</option>`).join('');
+  sel.value = wanted;
+  // 当前课程已不在列表里（被删了/换了库）→ 回到"不限定课程"，不留一个选不中的值
+  if (sel.value !== wanted) sel.value = '';
+}
+
+$('courseSel')?.addEventListener('change', () => {
+  const v = $('courseSel').value;
+  courseId = v ? Number(v) : null;
+  window.api.setCourse(courseId);
+  setStatus(
+    courseId
+      ? '已切到这门课：材料检索只查它，问答也归到它'
+      : '已改为「不限定课程」：材料检索查全部课程',
+  );
+});
+
+// ---- R4：粘贴图片（截图后 Ctrl+V）----
+// 面板的 CSP 已放开 img-src data:（见 panel.html），否则缩略图会被拦成坏图。
+let pendingImages = [];
+const MAX_IMG_EDGE = 1600;
+const MAX_TOTAL_BYTES = 3 * 1024 * 1024;
+
+function dataUrlBytes(u) {
+  const i = (u || '').indexOf(',');
+  if (i < 0) return (u || '').length;
+  const b64 = u.slice(i + 1);
+  const pad = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - pad);
+}
+
+function humanBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+/** 压缩到最长边 1600（与主程序 lib/images.ts 同口径），优先 PNG、过大转 JPEG */
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const w0 = img.naturalWidth || img.width;
+      const h0 = img.naturalHeight || img.height;
+      if (!w0 || !h0) return reject(new Error('尺寸读不出来'));
+      const scale = Math.min(1, MAX_IMG_EDGE / Math.max(w0, h0));
+      const w = Math.max(1, Math.round(w0 * scale));
+      const h = Math.max(1, Math.round(h0 * scale));
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      const png = cv.toDataURL('image/png');
+      resolve(dataUrlBytes(png) <= 1_200_000 ? png : cv.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('这张图读不出来')); };
+    img.src = url;
+  });
+}
+
+function renderImages() {
+  const strip = $('imgStrip');
+  const hint = $('imgHint');
+  if (!strip) return;
+  strip.innerHTML = '';
+  pendingImages.forEach((src, i) => {
+    const box = document.createElement('span');
+    box.className = 'img-thumb';
+    const im = document.createElement('img');
+    im.src = src;
+    im.alt = `第 ${i + 1} 张待发送的图片`;
+    im.title = '点击放大';
+    im.addEventListener('click', () => {
+      const w = window.open('', '_blank');
+      if (w) w.document.write(`<title>图片</title><img src="${src}" style="max-width:100%">`);
+    });
+    const x = document.createElement('button');
+    x.className = 'img-thumb-x';
+    x.textContent = '×';
+    x.title = '移除这张';
+    x.addEventListener('click', () => {
+      pendingImages = pendingImages.filter((_, k) => k !== i);
+      renderImages();
+    });
+    box.appendChild(im);
+    box.appendChild(x);
+    strip.appendChild(box);
+  });
+  if (hint) {
+    const total = pendingImages.reduce((n, u) => n + dataUrlBytes(u), 0);
+    hint.textContent = pendingImages.length
+      ? `已放入 ${pendingImages.length} 张（共 ${humanBytes(total)}），会随这次提问一起发给模型`
+      : '';
+  }
+}
+
+async function takeImages(files) {
+  const rejected = [];
+  let total = pendingImages.reduce((n, u) => n + dataUrlBytes(u), 0);
+  for (const f of files) {
+    try {
+      const dataUrl = await compressImage(f);
+      const bytes = dataUrlBytes(dataUrl);
+      if (total + bytes > MAX_TOTAL_BYTES) {
+        rejected.push(`「${f.name || '粘贴的图片'}」没放进来：加上它共 ${humanBytes(total + bytes)}，超过 ${humanBytes(MAX_TOTAL_BYTES)} 上限`);
+        continue;
+      }
+      total += bytes;
+      pendingImages.push(dataUrl);
+    } catch (e) {
+      rejected.push(`「${f.name || '粘贴的图片'}」没放进来：${e.message || e}`);
+    }
+  }
+  renderImages();
+  if (rejected.length) setStatus(rejected.join('；'));
+}
+
+// 正文框支持 Ctrl+V 粘贴图片；纯文本粘贴不拦（走浏览器默认行为）
+$('source').addEventListener('paste', (e) => {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  const files = [];
+  for (const it of Array.from(dt.items || [])) {
+    if (it.kind === 'file' && it.type.startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (files.length === 0) return;
+  e.preventDefault();
+  void takeImages(files);
+});
+
+// ---- 按钮事件 ----
+// R4：「翻译」已按用户要求移除；保留「材料/关联」与「问春晓」。
 $('btnRelate').addEventListener('click', () => {
   const text = $('source').value.trim();
   if (!text) { setStatus('请先输入/抓取文本'); return; }
   showRelatePlaceholder(text);
 });
 
-$('btnAsk').addEventListener('click', () => {
-  const sourceText = $('source').value.trim();
-  // 有选中文字 → 关联模式（显示上下文提示条）；无选中文字 → 纯询问模式
-  if (sourceText) {
-    $('askContextBar').style.display = 'block';
-    $('askContextText').textContent = sourceText.length > 120 ? sourceText.slice(0, 120) + '…' : sourceText;
-    $('askUseContext').checked = true; // 每次弹出默认启用关联
-  } else {
-    $('askContextBar').style.display = 'none';
+/**
+ * R4：不再弹模态框 —— 面板下方的「要问春晓的内容」就是要问的内容（含图片）。
+ * 任务完成后会把「问题 + 回答 + 图片」回推给主程序落库（见 onTaskDone）。
+ */
+let pendingAsk = null;
+
+function askNow() {
+  const question = $('source').value.trim();
+  const images = pendingImages.slice();
+  if (!question && images.length === 0) {
+    setStatus('请先输入/抓取内容，或粘贴一张图片');
+    return;
   }
-  $('askInput').value = '';
-  $('askModal').classList.add('show');
-  setTimeout(() => $('askInput').focus(), 100);
-});
-$('askCancel').addEventListener('click', () => $('askModal').classList.remove('show'));
-$('askOk').addEventListener('click', () => {
-  const q = $('askInput').value.trim();
-  $('askModal').classList.remove('show');
-  if (!q) { setStatus('问题不能为空'); return; }
-  const sourceText = $('source').value.trim();
-  // 有关联上下文且 checkbox 勾选 → 关联询问；否则 → 纯询问
-  const useContext = sourceText && $('askUseContext').checked;
-  if (useContext) {
-    startTask('ask', { question: q, context: sourceText });
-    setStatus('关联询问中…');
-  } else {
-    startTask('ask', { question: q, context: '' });
-    setStatus('询问中…');
-  }
-});
+  pendingAsk = { question, images };
+  pendingImages = [];
+  renderImages();
+  startTask('ask', { question, context: '', images });
+  setStatus(images.length ? `问春晓中…（含 ${images.length} 张图）` : '问春晓中…');
+}
+
+$('btnAsk').addEventListener('click', askNow);
 
 $('btnStop').addEventListener('click', () => window.api.stopTask());
 $('btnCopy').addEventListener('click', async () => {
@@ -439,10 +594,15 @@ window.addEventListener('drop', (e) => {
 
 // 初始化
 (async function init() {
-  const { config } = await window.api.getState();
+  const { config, courses: initCourses, courseId: initCourseId } = await window.api.getState();
   cfgCache = config;
   pendingGrabMode = config.grabMode === 'manual' ? 'manual' : 'auto';
   syncGrabButtons(); // 让主面板快捷按钮一打开就显示当前抓取模式
   applyTheme(THEMES[config.theme || 'dark']);
+  // R4：课程上下文（主程序为单一事实来源；这里只显示与回写）
+  courses = Array.isArray(initCourses) ? initCourses : [];
+  courseId = initCourseId != null ? initCourseId : null;
+  renderCourses();
+  renderImages();
   if (!config.ai.apiKey) setStatus('未配置 API Key，请点 ⚙ 填写');
 })();

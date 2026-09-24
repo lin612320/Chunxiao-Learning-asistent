@@ -370,6 +370,45 @@ async function main() {
     ok("?float=1 紧凑模式生效", compact && compact.hasShell === true, JSON.stringify(compact));
     ok("紧凑模式下无侧栏与顶栏", compact && compact.sidebar === 0 && compact.topbar === 0, JSON.stringify(compact));
 
+    // ---------------- R4：粘贴图片提问（答疑页） ----------------
+    // 真造一个 ClipboardEvent（带一张 1×1 PNG）打到 textarea 上，再断言：
+    //   ① 出现了待发送缩略图；② 发送按钮如实变成「含 N 图」。
+    // 为什么不用 Input.dispatchKeyEvent：那要真往系统剪贴板塞图，会污染用户剪贴板；
+    // 这里构造的 DataTransfer 走的是**同一条** onPaste 处理链路。
+    console.log("  · R4：答疑页粘贴图片");
+    await goto(session, "/#/assistant");
+    const pasted = await session.eval(`(async () => {
+      const ta = document.querySelector('.assistant-input textarea') || document.querySelector('textarea');
+      if (!ta) return { ok: false, why: '没找到 textarea' };
+      const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const file = new File([bytes], 'shot.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+      ta.dispatchEvent(ev);
+      // 等一拍：压缩走的是 canvas → 异步
+      await new Promise((r) => setTimeout(r, 400));
+      const thumbs = document.querySelectorAll('.img-thumb img').length;
+      const btn = [...document.querySelectorAll('.assistant-input button')]
+        .map((b) => b.textContent || '').find((x) => /发送|生成中/.test(x)) || '';
+      return { ok: true, thumbs, btn };
+    })()`);
+    ok("粘贴图片后出现待发送缩略图", !!(pasted && pasted.ok && pasted.thumbs > 0), JSON.stringify(pasted));
+    ok(
+      "发送按钮如实标注图片数量",
+      !!(pasted && pasted.ok && /含\s*\d+\s*图/.test(pasted.btn)),
+      `按钮文本=${pasted && pasted.btn}`,
+    );
+    const thumbBox = await session.eval(
+      `(() => { const el = document.querySelector('.img-thumb img'); if (!el) return null; return { src: String(el.getAttribute('src') || '').slice(0, 22), w: el.naturalWidth }; })()`,
+    );
+    ok(
+      "缩略图真的是 data: 图片且能解码（不是坏图）",
+      !!(thumbBox && thumbBox.src.startsWith('data:image/') && thumbBox.w > 0),
+      JSON.stringify(thumbBox),
+    );
+
     // ---------------- /settings ----------------
     console.log("\n[5/9] /settings 数据设置（BYOK）");
     await goto(session, "/#/settings");
@@ -378,6 +417,21 @@ async function main() {
     ok("有 API 地址 / Key / 模型字段", t.includes("API") || t.includes("Key"), "缺少 BYOK 字段");
     ok("有「测试连接」", t.includes("测试") , "缺少测试连接入口");
     ok("含诚实边界说明（不面向考试 / 数据在本机）", /不面向考试|课后|本机/.test(t), "缺少边界说明");
+    // R4：图片识别（可选视觉模型）+ 三种图片提问方式
+    ok("有「图片识别」区（可单独指定视觉模型）", /图片识别/.test(t), "缺少图片识别配置入口");
+    const modeChips = await session.eval(
+      `(() => { const want = ['自动','直接发图','先转成文字']; const got = [...document.querySelectorAll('.chip')].map((c) => (c.textContent||'').trim()); return want.filter((w) => got.includes(w)); })()`,
+    );
+    ok(
+      "有「图片提问方式」三档（自动 / 直接发图 / 先转成文字）",
+      Array.isArray(modeChips) && modeChips.length === 3,
+      JSON.stringify(modeChips),
+    );
+    ok(
+      "如实说明「现在会怎么走」",
+      /现在会怎么走/.test(t),
+      "缺少图片路由的如实说明",
+    );
 
     // ---------------- 全站占位措辞扫描 ----------------
     // M4 之后所有板块都应落地，因此这里从"逐页查占位"改成**全站扫描**：

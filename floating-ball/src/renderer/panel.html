@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
 <title>AI 小窗</title>
 <style>
   :root {
@@ -68,7 +68,26 @@
   .btn:disabled { opacity:.45; cursor:not-allowed; }
   .btn.relate { opacity:.7; }
   .btn.relate::after { content:' 📚'; font-size:11px; }
-  .lang-sel { width:auto; flex:0 0 auto; min-width:70px; padding:9px 6px; }
+  /* R4：粘贴进来的图片（待发送） */
+  .img-strip { display:flex; flex-wrap:wrap; gap:6px; }
+  .img-strip:empty { display:none; }
+  .img-thumb { position:relative; width:54px; height:54px; }
+  .img-thumb img {
+    width:100%; height:100%; object-fit:cover; border-radius:8px;
+    border:1px solid var(--border); display:block; cursor:zoom-in;
+  }
+  .img-thumb-x {
+    position:absolute; top:-5px; right:-5px; width:16px; height:16px; line-height:14px;
+    text-align:center; border-radius:50%; background:#d1242f; color:#fff;
+    font-size:11px; font-weight:700; cursor:pointer; border:none; padding:0;
+  }
+  .img-hint { font-size:11px; color:var(--muted); line-height:1.5; }
+  .img-hint:empty { display:none; }
+
+  /* R4：课程上下文行（R1 阶段 2） */
+  .course-row { display:flex; align-items:center; gap:8px; }
+  .course-row label { font-size:12px; color:var(--muted); flex:0 0 auto; white-space:nowrap; }
+  .course-row select { flex:1; }
 
   .result-wrap { flex:1; min-height:100px; display:flex; flex-direction:column; gap:6px; }
   .result-head { display:flex; align-items:center; gap:6px; }
@@ -193,20 +212,26 @@
   </div>
 
   <div class="body">
-    <div class="field">
-      <div class="label">文本 / 问题</div>
-      <textarea id="source" placeholder="选中文字自动填入，也可手动输入…"></textarea>
+    <!-- R4：课程上下文（R1 阶段 2）—— 课程列表与当前选择由主程序下发，改动即回写 -->
+    <div class="course-row">
+      <label>课程</label>
+      <select id="courseSel" title="选好之后：材料检索只在这门课里查，问春晓的问答也归到这门课">
+        <option value="">不限定课程</option>
+      </select>
     </div>
 
+    <div class="field">
+      <div class="label">要问春晓的内容</div>
+      <textarea id="source" placeholder="选中文字会自动填到这里；也可手动输入；截图后可直接 Ctrl+V 粘贴图片"></textarea>
+    </div>
+
+    <!-- R4：粘贴进来的图片（缩略图，可单张删除） -->
+    <div class="img-strip" id="imgStrip"></div>
+    <div class="img-hint" id="imgHint"></div>
+
     <div class="actions">
-      <button class="btn primary" id="btnTranslate">翻译</button>
-      <select id="lang" class="lang-sel">
-        <option value="中文">中</option><option value="英文">英</option>
-        <option value="日文">日</option><option value="韩文">韩</option>
-        <option value="法文">法</option><option value="德文">德</option>
-      </select>
-      <button class="btn relate" id="btnRelate" title="在你导入的课程材料中查找（材料检索 M2 开放）">材料</button>
-      <button class="btn" id="btnAsk">询问</button>
+      <button class="btn relate" id="btnRelate" title="在你导入的课程材料中查找（本机检索，不联网）">材料</button>
+      <button class="btn primary" id="btnAsk" title="把上面的内容连图片一起问春晓">问春晓</button>
     </div>
 
     <!-- 抓取模式快捷切换（与「设置」抽屉同步）：自动抓取 / 手动拖入 -->
@@ -267,28 +292,8 @@
     </div>
   </div>
 
-  <!-- 询问对话框 -->
-  <div class="modal-mask" id="askModal">
-    <div class="modal">
-      <div class="modal-title">输入你的问题</div>
-      <div class="modal-body">
-        <div id="askContextBar" style="display:none; font-size:11px; color:var(--muted); background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-bottom:8px; max-height:80px; overflow:auto;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <span style="color:var(--accent);">📍 关联模式：以下选中文字将作为上下文</span>
-            <label style="display:flex; align-items:center; gap:4px; cursor:pointer; color:var(--text); font-size:11px; white-space:nowrap;">
-              <input type="checkbox" id="askUseContext" checked style="cursor:pointer;" /> 启用关联
-            </label>
-          </div>
-          <div id="askContextText"></div>
-        </div>
-        <textarea id="askInput" placeholder="想了解什么？"></textarea>
-      </div>
-      <div class="modal-actions">
-        <button class="btn" id="askCancel">取消</button>
-        <button class="btn primary" id="askOk">开始询问</button>
-      </div>
-    </div>
-  </div>
+  <!-- R4：原「询问对话框」已删除 —— 用户要求"正文直接铺在下方显示要问的内容"，
+       不再用模态框二次输入问题（少一步、也不会把上下文藏在弹窗里）。 -->
 </div>
 <script src="panel.js"></script>
 </body>

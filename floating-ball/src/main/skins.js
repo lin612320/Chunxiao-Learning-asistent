@@ -14,7 +14,7 @@ const BALL_SKINS = {
     ball: { from: '#43e97b', to: '#38f9d7', shape: 'circle', image: null },
     pet: {
       face: '🦊', dragAnim: 'wobble',
-      dialogues: ['今天也要元气满满哦！', '选中文字按 Alt+Q，我来帮你翻译~', '点点我，打开 AI 小窗', '累了吗？休息一下吧 🌿']
+      dialogues: ['今天也要元气满满哦！', '选中文字按 Alt+Q，我来帮你查材料~', '点点我，打开 AI 小窗', '累了吗？休息一下吧 🌿']
     }
   },
   midnight: {
@@ -30,7 +30,7 @@ const BALL_SKINS = {
     ball: { from: '#ff9a9e', to: '#fad0c4', shape: 'blob', image: null },
     pet: {
       face: '🐱', dragAnim: 'bounce',
-      dialogues: ['喵~ 有什么可以帮你吗？', '选中文字就能翻译啦！', '今日份的可爱已送达 🌸', '拖我到处跑也很好玩呢']
+      dialogues: ['喵~ 有什么可以帮你吗？', '选中文字就能问春晓啦！', '今日份的可爱已送达 🌸', '拖我到处跑也很好玩呢']
     }
   },
   ocean: {
@@ -46,7 +46,7 @@ const BALL_SKINS = {
     ball: { from: '#ff512f', to: '#f09819', shape: 'circle', image: null },
     pet: {
       face: '🐹', dragAnim: 'bounce',
-      dialogues: ['囤了一口袋小知识！', '快选中文字让我瞧瞧~', '夕阳好暖，加油呀', '我可以翻译、关联、问答三合一']
+      dialogues: ['囤了一口袋小知识！', '快选中文字让我瞧瞧~', '夕阳好暖，加油呀', '我可以关联材料、问答两用']
     }
   },
   mono: {

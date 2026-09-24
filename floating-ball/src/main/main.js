@@ -61,7 +61,7 @@ app.on('second-instance', (_e, argv) => {
   // 优先级：run > prefill > cmd
   if (args.run && typeof args.run === 'object') {
     const { kind, opts } = args.run;
-    if (['translate', 'relate', 'ask'].includes(kind)) {
+    if (['relate', 'ask'].includes(kind)) {
       windows.showPanel(config);
       windows.sendToPanel('selection:result', opts.text || opts.question || '');
       // 通知面板直接跑任务（通过 IPC：向已打开面板注入 startTask）
@@ -225,11 +225,40 @@ function registerIpc() {
     panel.setPosition(Math.round(nx), Math.round(ny));
   });
 
-  // 获取状态（配置 + 皮肤列表 + 主题列表）
+  // R4：课程上下文缓存（R1 阶段 2）。
+  //   **单一事实来源在主程序**（`settings.ball.course_id`），这里只是镜像：
+  //   主程序随 show / prefill 下发，球改动后回写，重启后仍以主程序为准。
+  const courseCache = { courses: [], courseId: null };
+
+  /**
+   * 写桥接文件（`from-ball.json`）—— 所有「球 → 主程序」的推送都走这里。
+   *
+   * 统一入口的理由：**每一条推送都要带上当前课程**，否则主程序没法把问答/检索
+   * 归到正确的课程（`docs/15` §3.2 冻结形状）。分散写的话迟早漏一处。
+   */
+  function writeBridge(payload) {
+    try {
+      if (!fs.existsSync(BRIDGE_DIR)) fs.mkdirSync(BRIDGE_DIR, { recursive: true });
+      fs.writeFileSync(
+        BRIDGE_FILE,
+        JSON.stringify({ ts: Date.now(), ...payload }, null, 2),
+        'utf8'
+      );
+      // 尝试拉起春晓学习助手（用户可能还没开主程序）
+      spawnAppIfNeeded();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  }
+
+  // 获取状态（配置 + 皮肤列表 + 主题列表 + 课程上下文）
   ipcMain.handle('state:get', () => ({
     config,
     skins: listBallSkins(),
-    themes: listPanelThemes()
+    themes: listPanelThemes(),
+    courses: courseCache.courses,
+    courseId: courseCache.courseId
   }));
 
   // 抓取选中文字
@@ -352,37 +381,48 @@ function registerIpc() {
 
   // 推送到春晓学习助手：写桥接文件 + spawn（如未运行）
   ipcMain.handle('app:push', (_evt, { text, action }) => {
-    try {
-      if (!fs.existsSync(BRIDGE_DIR)) fs.mkdirSync(BRIDGE_DIR, { recursive: true });
-      const msg = {
-        ts: Date.now(),
-        text: text || '',
-        action: action || 'prefill' // prefill | translate | ask
-      };
-      fs.writeFileSync(BRIDGE_FILE, JSON.stringify(msg, null, 2), 'utf8');
-      // 尝试拉起春晓学习助手（dev 模式下 spawn npm run dev）
-      spawnAppIfNeeded();
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
-    }
+    return writeBridge({
+      text: text || '',
+      action: action || 'prefill', // prefill | ask
+      course_id: courseCache.courseId
+    });
   });
 
   // 「关联课程材料」：请求主程序在用户导入的课件 / 先验知识中检索，结果经 to-ball.json 回传
-  // M0：桥接链路已通；主程序侧的材料检索在 M2 实现（届时在 Rust 侧新增 material_search 处理）
+  // R4：带上当前课程 —— 主程序据此只在该课程的材料里检索（见 ball.rs 的 answer_material_search）
   ipcMain.handle('material:ask', (_evt, { text }) => {
-    try {
-      if (!fs.existsSync(BRIDGE_DIR)) fs.mkdirSync(BRIDGE_DIR, { recursive: true });
-      fs.writeFileSync(
-        BRIDGE_FILE,
-        JSON.stringify({ ts: Date.now(), text: text || '', action: 'material_search' }, null, 2),
-        'utf8'
-      );
-      spawnAppIfNeeded();
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
-    }
+    return writeBridge({
+      text: text || '',
+      action: 'material_search',
+      course_id: courseCache.courseId
+    });
+  });
+
+  // R4：悬浮球切换课程 → 回写主程序持久化（主程序是单一事实来源）
+  ipcMain.handle('course:set', (_evt, { courseId }) => {
+    courseCache.courseId = courseId == null ? null : Number(courseId);
+    return writeBridge({
+      text: '',
+      action: 'set_course',
+      course_id: courseCache.courseId
+    });
+  });
+
+  /**
+   * R4：把一次问答回推给主程序**落库**（问题 + 回答 + 图片 + 课程）。
+   *
+   * 为什么由球推、主程序写：球自己写的答案只在球里，主程序的历史/笔记/画像都用不到；
+   * 而主程序侧由桥接轮询线程直接写库（`db::ball_append_qa`），
+   * **不依赖主程序界面是否打开** —— 关着也能存下来。
+   */
+  ipcMain.handle('app:pushAsk', (_evt, { text, answer, images }) => {
+    return writeBridge({
+      text: text || '',
+      action: 'ask',
+      answer: answer || '',
+      images: Array.isArray(images) ? images : [],
+      course_id: courseCache.courseId
+    });
   });
 }
 
@@ -478,6 +518,16 @@ app.whenReady().then(() => {
           save(config);
           windows.sendToPanel('config:synced', { ai: config.ai });
           console.log('[ctrl] 已同步主程序的 AI 配置');
+        }
+        // R4：课程上下文（随 show / prefill 一起下发）—— 面板据此显示课程下拉
+        if (msg.courses !== undefined || msg.courseId !== undefined) {
+          courseCache.courses = Array.isArray(msg.courses) ? msg.courses : [];
+          courseCache.courseId = msg.courseId == null ? null : Number(msg.courseId);
+          windows.sendToPanel('courses:sync', {
+            courses: courseCache.courses,
+            courseId: courseCache.courseId
+          });
+          console.log(`[ctrl] 已同步课程上下文（${courseCache.courses.length} 门，当前 ${courseCache.courseId}）`);
         }
         if (cmd === 'show') {
           // 显示球（如果被隐藏了）+ 打开面板

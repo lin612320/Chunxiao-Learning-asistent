@@ -11,6 +11,7 @@ import { isTauri } from "../lib/tauri";
 import Mascot from "../components/Mascot";
 import Icon from "../components/Icon";
 import TechNote from "../components/TechNote";
+import { collectImages, dataUrlBytes, humanBytes, imagesFromClipboard } from "../lib/images";
 // R1（契约 `docs/11-R1对话课程归属与先验知识提炼契约.md` §3.1 / §3.2）：
 // 课程上下文与检索范围的口径统一放在 lib/courseScope.ts，避免各页各写一套。
 import {
@@ -35,7 +36,7 @@ export default function Assistant() {
   // R1：`/assistant?course=N` = 该课程上下文；`/assistant` 无参数 = **不限定课程**（§3.1）
   const urlCourseId = parseCourseParam(search);
 
-  const { s, hasKey } = useSettings();
+  const { s, hasKey, visionConfig } = useSettings();
   const { courses } = useCourses();
   const {
     sessions,
@@ -44,6 +45,7 @@ export default function Assistant() {
     loading,
     sending,
     searching,
+    imageBusy,
     lastSearch,
     error,
     setError,
@@ -53,12 +55,24 @@ export default function Assistant() {
     setSessionCourse,
     send,
     stop,
-  } = useChat({ ai: s.ai, hasKey, courseId: urlCourseId }); // ← G1/G2/G3 的修复点：把课程上下文接上数据层
+  } = useChat({
+    ai: s.ai,
+    hasKey,
+    courseId: urlCourseId, // ← G1/G2/G3 的修复点：把课程上下文接上数据层
+    vision: visionConfig,
+    imageMode: s.imageMode,
+  });
 
   const [text, setText] = useState("");
   const [mode, setMode] = useState<AskMode>("explain");
   /** M1：默认开启「先查课程材料再回答」 */
   const [useMaterials, setUseMaterials] = useState(true);
+  /** R4：本轮要随问题发出去的图片（已压缩的 dataURL） */
+  const [images, setImages] = useState<string[]>([]);
+  /** R4：图片相关的**如实提示**（被拒的原因等），不静默丢弃 */
+  const [imgNotice, setImgNotice] = useState<string | null>(null);
+  /** R4：点击缩略图放大查看 */
+  const [zoom, setZoom] = useState<string | null>(null);
   /** R1：改归属成功后的**明说**提示（移到哪门课 / 改成不限定课程） */
   const [moveNotice, setMoveNotice] = useState<string | null>(null);
   /** R1：最近课程提示条被忽略后，本次会话内不再出现（它只是**可选**提示，绝不自动套用） */
@@ -80,9 +94,39 @@ export default function Assistant() {
 
   async function handleSend() {
     const t = text.trim();
-    if (!t || sending) return;
+    // R4：允许"只有图片、没有文字"（贴一张题图直接问是最常见的用法）
+    if ((!t && images.length === 0) || sending) return;
+    const sendingImages = images;
     setText("");
-    await send(t, mode, useMaterials);
+    setImages([]);
+    setImgNotice(null);
+    await send(t, mode, useMaterials, sendingImages);
+  }
+
+  /** R4：粘贴图片 —— 截图后直接 Ctrl+V。纯文本粘贴**不拦**，照旧交给 textarea。 */
+  async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = imagesFromClipboard(e.nativeEvent);
+    if (files.length === 0) return; // 没有图片 → 让它走默认的文本粘贴
+    e.preventDefault();
+    const { images: added, rejected } = await collectImages(files, images);
+    if (added.length > 0) setImages((prev) => [...prev, ...added]);
+    setImgNotice(
+      rejected.length > 0
+        ? rejected.join("\n")
+        : added.length > 0
+          ? `已放入 ${added.length} 张图片（会随这次提问一起发给模型）`
+          : null,
+    );
+  }
+
+  /** 拖拽图片进来也支持（与粘贴走同一条压缩链路） */
+  async function handleDropImages(e: React.DragEvent<HTMLDivElement>) {
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) return;
+    e.preventDefault();
+    const { images: added, rejected } = await collectImages(files, images);
+    if (added.length > 0) setImages((prev) => [...prev, ...added]);
+    setImgNotice(rejected.length > 0 ? rejected.join("\n") : `已放入 ${added.length} 张图片`);
   }
 
   const current = sessions.find((x) => x.id === currentId);
@@ -334,6 +378,22 @@ export default function Assistant() {
               return (
                 <div className={"msg " + (m.role === "user" ? "user" : "assistant")} key={i}>
                   <div className="msg-col">
+                    {/* R4：本轮提问带的图片（随消息落库，可回看、可放大） */}
+                    {m.images && m.images.length > 0 ? (
+                      <div className="msg-imgs">
+                        {m.images.map((src, k) => (
+                          <button
+                            type="button"
+                            className="msg-img"
+                            key={k}
+                            onClick={() => setZoom(src)}
+                            title="点击放大"
+                          >
+                            <img src={src} alt={`第 ${k + 1} 张图片`} />
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                     <div className="msg-bubble">{m.content}</div>
 
                     {/* 没找到 / 查找出错：显式标注"没有材料出处" */}
@@ -386,6 +446,11 @@ export default function Assistant() {
                 </div>
               );
             })
+        )}
+        {imageBusy && (
+          <div className="loading-line">
+            正在让视觉模型把图片转成文字…（这一步用的是你配的视觉模型，转完再交给主模型回答）
+          </div>
         )}
         {searching && <div className="loading-line">正在这台电脑上的课程材料里找…（不联网）</div>}
 
@@ -455,22 +520,69 @@ export default function Assistant() {
             材料检索全部在这台电脑上完成，不联网；只有你提出的问题会发给模型。
           </p>
         </TechNote>
-        <textarea
-          rows={isFloat ? 2 : 3}
-          value={text}
-          placeholder={
-            hasKey
-              ? "输入问题，Enter 换行；按「发送」提交（Ctrl+Enter 也可）"
-              : "现在是演示模式：可以先试试界面，填好 Key 之后才会真正让模型回答"
-          }
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        {/* R4：图片区（粘贴 / 拖入）——缩略图 + 可删 + 如实提示被拒原因 */}
+        {images.length > 0 && (
+          <div className="img-strip">
+            {images.map((src, i) => (
+              <span className="img-thumb" key={i}>
+                <button
+                  type="button"
+                  className="img-thumb-pic"
+                  onClick={() => setZoom(src)}
+                  title="点击放大"
+                >
+                  <img src={src} alt={`第 ${i + 1} 张待发送的图片`} />
+                </button>
+                <button
+                  type="button"
+                  className="img-thumb-x"
+                  onClick={() => setImages((prev) => prev.filter((_, k) => k !== i))}
+                  title="移除这张"
+                  aria-label="移除这张图片"
+                >
+                  <Icon name="close" size={12} />
+                </button>
+                <span className="img-thumb-size">{humanBytes(dataUrlBytes(src))}</span>
+              </span>
+            ))}
+            <button type="button" className="ghost-btn img-strip-clear" onClick={() => setImages([])}>
+              全部移除
+            </button>
+          </div>
+        )}
+        {imgNotice && (
+          <div className="img-notice" onClick={() => setImgNotice(null)} role="status">
+            {imgNotice}
+          </div>
+        )}
+        <div
+          className="assistant-drop"
+          onDrop={(e) => void handleDropImages(e)}
+          onDragOver={(e) => {
+            if (Array.from(e.dataTransfer?.items ?? []).some((it) => it.kind === "file")) {
               e.preventDefault();
-              void handleSend();
+              e.dataTransfer.dropEffect = "copy";
             }
           }}
-        />
+        >
+          <textarea
+            rows={isFloat ? 2 : 3}
+            value={text}
+            placeholder={
+              hasKey
+                ? "输入问题；截图后可直接 Ctrl+V 粘贴图片（Enter 换行，Ctrl+Enter 发送）"
+                : "现在是演示模式：可以先试试界面，填好 Key 之后才会真正让模型回答"
+            }
+            onChange={(e) => setText(e.target.value)}
+            onPaste={(e) => void handlePaste(e)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                void handleSend();
+              }
+            }}
+          />
+        </div>
         <div className="assistant-input-foot">
           <span className="muted" style={{ fontSize: 12 }}>
             AI 写的内容要自己核对 · 对话与材料只存在这台电脑上
@@ -481,12 +593,24 @@ export default function Assistant() {
                 停止
               </button>
             )}
-            <button className="primary small" disabled={sending || !text.trim()} onClick={() => void handleSend()}>
-              {sending ? "生成中…" : "发送"}
+            <button
+              className="primary small"
+              disabled={sending || (!text.trim() && images.length === 0)}
+              onClick={() => void handleSend()}
+            >
+              {sending ? "生成中…" : images.length > 0 ? `发送（含 ${images.length} 图）` : "发送"}
             </button>
           </div>
         </div>
       </div>
+
+      {/* R4：点击缩略图放大查看（纯前端，不请求任何服务） */}
+      {zoom && (
+        <div className="img-zoom" onClick={() => setZoom(null)} role="dialog" aria-label="放大查看图片">
+          <img src={zoom} alt="放大的图片" />
+          <span className="img-zoom-hint">点击任意处关闭</span>
+        </div>
+      )}
     </div>
   );
 }

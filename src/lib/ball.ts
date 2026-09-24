@@ -89,8 +89,15 @@ export async function ballQuit() {
 
 export interface BallPushPayload {
   text: string;
-  action: string; // prefill | ask
+  action: string; // prefill | ask | material_search | set_course | …
   ts: number;
+  /**
+   * R4（`docs/11` §六 冻结字段）：这次推送所属的课程。
+   * `action === "ask"` 时，主程序**已把问答写进该课程的会话**，前端只需刷新界面。
+   */
+  course_id?: number | null;
+  /** R4：`action === "ask"` 时主程序落库所用的会话 id */
+  session_id?: number;
 }
 
 /**

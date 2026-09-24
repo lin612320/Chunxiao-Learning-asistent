@@ -298,11 +298,25 @@ fn ctrl_file() -> PathBuf {
 }
 
 /// 悬浮球 → 春晓 桥接消息
+///
+/// R4：按 `docs/11` §六 的冻结登记，载荷新增三个字段。
+/// ⚠ `text` 改为 `#[serde(default)]`：`set_course`（只切课程、没问题文本）不会带 `text`，
+///   若仍要求必填，整条消息会反序列化失败并被**静默丢弃** —— 那正是最难查的一类缺陷。
 #[derive(Debug, Deserialize, Clone)]
 struct BridgeMsg {
     ts: u64,
+    #[serde(default)]
     text: String,
     action: String,
+    /// `docs/11` §六 已冻结：球回推时带上它所属的课程
+    #[serde(default)]
+    course_id: Option<i64>,
+    /// R4 新增：球侧已生成的回答（供主程序落库，见 `db::ball_append_qa`）
+    #[serde(default)]
+    answer: Option<String>,
+    /// R4 新增：本轮图片的 dataURL（供主程序落库）
+    #[serde(default)]
+    images: Option<Vec<String>>,
 }
 
 /// 已消费的消息时间戳（避免重复处理）
@@ -360,6 +374,94 @@ fn ai_config_of(conn: &rusqlite::Connection) -> Option<serde_json::Value> {
     }))
 }
 
+// ---------------------------------------------------------------------------
+// R4：悬浮球的课程上下文（`docs/11` §六 阶段 2）
+// ---------------------------------------------------------------------------
+
+/// 悬浮球当前选中的课程（`settings.ball.course_id`）。
+///
+/// **单一事实来源在库侧**（不是球的本地配置）：主程序读它下发、球改动后回写它，
+/// 这样"球重启 / 主程序重启 / 换皮肤"都不会让选择漂移。
+/// 值非法（非数字、指向不存在的课程）一律按**不限定课程**处理。
+fn ball_course_id(conn: &rusqlite::Connection) -> Option<i64> {
+    let raw: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'ball.course_id'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+    let id: i64 = raw.trim().parse().ok()?;
+    let ok: bool = conn
+        .query_row("SELECT 1 FROM courses WHERE id = ?1", [id], |_| Ok(()))
+        .is_ok();
+    if !ok {
+        // 课程被删了/库被换过：不能让球一直指向一个不存在的课程
+        eprintln!("[ball] settings.ball.course_id={id} 已失效，按「不限定课程」下发");
+        return None;
+    }
+    Some(id)
+}
+
+/// 持久化球的课程选择（`None` = 不限定课程，**写空串而不是删行**，便于排查"是谁改的"）
+fn set_ball_course_id(conn: &rusqlite::Connection, course_id: Option<i64>) -> Result<(), String> {
+    let v = course_id.map(|id| id.to_string()).unwrap_or_default();
+    conn.execute(
+        "INSERT INTO settings(key, value) VALUES('ball.course_id', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [v],
+    )
+    .map_err(|e| format!("保存悬浮球课程选择失败：{e}"))?;
+    Ok(())
+}
+
+/// 供球面板下拉用的课程列表（`[{id, name}]`）：未归档在前，同组按创建时间倒序。
+fn courses_for_ball(conn: &rusqlite::Connection) -> Vec<serde_json::Value> {
+    let mut stmt = match conn.prepare(
+        "SELECT id, name FROM courses
+         ORDER BY archived ASC, created_at DESC, id DESC",
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[ball] 读取课程列表失败：{e}");
+            return Vec::new();
+        }
+    };
+    let rows = stmt.query_map([], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "name": r.get::<_, String>(1)?,
+        }))
+    });
+    match rows {
+        Ok(it) => it.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            eprintln!("[ball] 课程列表解析失败：{e}");
+            Vec::new()
+        }
+    }
+}
+
+/// 组装随 `show` / `prefill` 下发的课程上下文载荷。
+///
+/// 口径（`docs/11` §一 第 3 条）：**不自动套用"最近课程"** —— 没选过就是"不限定课程"，
+/// 由用户在球面板上显式选择。
+fn ball_context_of(conn: &rusqlite::Connection) -> serde_json::Map<String, serde_json::Value> {
+    let courses = courses_for_ball(conn);
+    let cid = ball_course_id(conn);
+    let name = cid.and_then(|id| {
+        conn.query_row("SELECT name FROM courses WHERE id = ?1", [id], |r| {
+            r.get::<_, String>(0)
+        })
+        .ok()
+    });
+    let mut m = serde_json::Map::new();
+    m.insert("courses".into(), serde_json::json!(courses));
+    m.insert("courseId".into(), serde_json::json!(cid));
+    m.insert("courseName".into(), serde_json::json!(name));
+    m
+}
+
 /// 通过共享控制文件向悬浮球下发命令。
 /// 比「二次 spawn 传命令行参数」可靠：Electron 便携版 stub / 打包 exe
 /// 对额外参数透传不可靠，而悬浮球主实例固定轮询控制文件，命令必达。
@@ -412,14 +514,14 @@ pub fn ball_start_cmd() -> Result<(), String> {
     ball_start().map(|_| ())
 }
 
-/// 显示悬浮球（球未运行时先拉起）；顺带把主程序的 AI 配置同步过去（BYOK）
+/// 显示悬浮球（球未运行时先拉起）；顺带把主程序的 AI 配置（BYOK）与**课程上下文**同步过去
 #[tauri::command]
 pub fn ball_show(conn: State<'_, DbState>) -> Result<(), String> {
-    let ai = {
+    let (ai, ctx) = {
         let c = lock_conn(&conn)?;
-        ai_config_of(&c)
+        (ai_config_of(&c), ball_context_of(&c))
     };
-    send_ctrl("show", serde_json::Map::new(), true, ai)
+    send_ctrl("show", ctx, true, ai)
 }
 
 /// 隐藏悬浮球面板（进程不退出；球没在跑时什么都不做）
@@ -428,16 +530,16 @@ pub fn ball_hide() -> Result<(), String> {
     send_ctrl("hide", serde_json::Map::new(), false, None)
 }
 
-/// 预填文本并打开面板（比如用户在春晓里选中了一段教材原文）；同样顺带同步 AI 配置
+/// 预填文本并打开面板（比如用户在春晓里选中了一段教材原文）；
+/// 同样顺带同步 AI 配置与课程上下文
 #[tauri::command]
 pub fn ball_prefill(conn: State<'_, DbState>, text: String) -> Result<(), String> {
-    let ai = {
+    let (ai, mut ctx) = {
         let c = lock_conn(&conn)?;
-        ai_config_of(&c)
+        (ai_config_of(&c), ball_context_of(&c))
     };
-    let mut extra = serde_json::Map::new();
-    extra.insert("text".into(), serde_json::json!(text));
-    send_ctrl("prefill", extra, true, ai)
+    ctx.insert("text".into(), serde_json::json!(text));
+    send_ctrl("prefill", ctx, true, ai)
 }
 
 /// 彻底退出悬浮球（球没在跑时什么都不做）
@@ -520,14 +622,14 @@ fn pick_keyword(text: &str) -> String {
 
 /// 「关联课程材料」按钮（球面板）→ 主程序本地检索 → 结果写回 `to-ball.json`。
 ///
-/// 三条纪律（契约 §三）：
-///   1. 检索范围是**全库**（`course_id = None`）—— 球侧没有课程上下文；
+/// 四条纪律（契约 §三）：
+///   1. ~~检索范围是**全库**~~ → **R4 起按球面板选中的课程过滤**（`course_id: None` 才全库）；
+///      这是本轮的行为变更，已在 `docs/15` §3.2 登记；
 ///   2. 回传载荷**逐字冻结** `{ts, cmd:"material_result", kw, results:[{material,page,snippet}], note?}`，
 ///      球侧 `panel.js` 按 `material / page / snippet` 与 `kw` 解析，字段名不能改；
-///   3. **不再 emit `ball-push`** —— 球推来的是「要检索的选中文字」，不是要插进对话框的划词文本。
-///
-/// 取锁失败 / 检索失败都不 panic：打日志 + 回一条带 note 的结果，轮询线程继续跑。
-fn answer_material_search(app: &AppHandle, text: &str) {
+///   3. **不再 emit `ball-push`** —— 球推来的是「要检索的选中文字」，不是要插进对话框的划词文本；
+///   4. 取锁失败 / 检索失败都不 panic：打日志 + 回一条带 note 的结果，轮询线程继续跑。
+fn answer_material_search(app: &AppHandle, text: &str, course_id: Option<i64>) {
     let kw = pick_keyword(text);
 
     // 取库：state 未就绪（理论上不会）与锁被污染都只报错不 panic
@@ -536,7 +638,7 @@ fn answer_material_search(app: &AppHandle, text: &str) {
     } else {
         match app.try_state::<DbState>() {
             Some(state) => match state.0.lock() {
-                Ok(conn) => crate::db::material_search(&conn, None, &kw, Some(8)),
+                Ok(conn) => crate::db::material_search(&conn, course_id, &kw, Some(8)),
                 Err(_) => Err("数据库连接锁被污染，请重启春晓。".to_string()),
             },
             None => Err("数据库尚未就绪，请稍后重试。".to_string()),
@@ -556,8 +658,11 @@ fn answer_material_search(app: &AppHandle, text: &str) {
                 })
                 .collect();
             let note = if brief.is_empty() {
+                // 措辞要跟着检索范围走：说"全库"却只查了某门课，是最容易误导用户的那种不一致
                 Some(if kw.is_empty() {
                     "选中的文字为空，没有可检索的关键词。".to_string()
+                } else if course_id.is_some() {
+                    "没在这门课的材料里找到相关内容；可把球面板的课程改成「不限定课程」再试，或先导入材料。".to_string()
                 } else {
                     "没有在你的课程材料中找到相关内容，可先在「课程」页导入材料。".to_string()
                 })
@@ -576,6 +681,7 @@ fn answer_material_search(app: &AppHandle, text: &str) {
     payload.insert("ts".into(), serde_json::json!(now_ms()));
     payload.insert("cmd".into(), serde_json::json!("material_result"));
     payload.insert("kw".into(), serde_json::json!(kw));
+    payload.insert("courseId".into(), serde_json::json!(course_id));
     payload.insert("results".into(), serde_json::json!(results));
     if let Some(n) = note {
         payload.insert("note".into(), serde_json::json!(n));
@@ -614,8 +720,61 @@ pub fn start_bridge_poller(app: AppHandle) {
         // 「关联课程材料」（球面板的📚按钮）：球要的是**检索结果**，走独立回传链路 ——
         // 调主程序本地检索 → 写 to-ball.json 的 material_result → **不 emit ball-push**
         // （否则前端会把这段选中文字当成划词文本插进对话框）。
+        // R4：检索范围跟着球面板选中的课程走（原先写死全库）
         if msg.action == "material_search" {
-            answer_material_search(&app, &msg.text);
+            answer_material_search(&app, &msg.text, msg.course_id);
+            let _ = fs::remove_file(&poll_file);
+            continue;
+        }
+
+        // R4：球面板切换了课程 → **只持久化选择**，不落任何消息。
+        // 主程序持有 `settings.ball.course_id` 作为单一事实来源（见 ball_course_id 注释）。
+        if msg.action == "set_course" {
+            match app.try_state::<DbState>() {
+                Some(state) => match state.0.lock() {
+                    Ok(conn) => {
+                        if let Err(e) = set_ball_course_id(&conn, msg.course_id) {
+                            eprintln!("[ball] {e}");
+                        }
+                    }
+                    Err(_) => eprintln!("[ball] 数据库连接锁被污染，悬浮球课程选择未保存"),
+                },
+                None => eprintln!("[ball] 数据库尚未就绪，悬浮球课程选择未保存"),
+            }
+            let _ = fs::remove_file(&poll_file);
+            continue;
+        }
+
+        // R4：球完成了一次问答 → **直接写库**（关闭 `docs/11` §六 的 G4），
+        // 再把 `course_id`/`session_id` emit 给前端，让正看着该课程的界面刷新。
+        // 刻意**不依赖任何页面打开**：球是独立应用，用户可能压根没开主程序界面。
+        if msg.action == "ask" {
+            let answer = msg.answer.clone().unwrap_or_default();
+            let images = msg.images.clone().unwrap_or_default();
+            let appended: Result<i64, String> = match app.try_state::<DbState>() {
+                Some(state) => match state.0.lock() {
+                    Ok(conn) => {
+                        crate::db::ball_append_qa(&conn, msg.course_id, &msg.text, &answer, &images)
+                    }
+                    Err(_) => Err("数据库连接锁被污染，请重启春晓。".to_string()),
+                },
+                None => Err("数据库尚未就绪，请稍后重试。".to_string()),
+            };
+            match appended {
+                Ok(session_id) => {
+                    let _ = app.emit(
+                        "ball-push",
+                        serde_json::json!({
+                            "text": msg.text,
+                            "action": "ask",
+                            "ts": msg.ts,
+                            "course_id": msg.course_id,
+                            "session_id": session_id,
+                        }),
+                    );
+                }
+                Err(e) => eprintln!("[ball] 悬浮球问答落库失败：{e}"),
+            }
             let _ = fs::remove_file(&poll_file);
             continue;
         }
@@ -628,6 +787,7 @@ pub fn start_bridge_poller(app: AppHandle) {
                 "text": msg.text,
                 "action": msg.action,
                 "ts": msg.ts,
+                "course_id": msg.course_id,
             }),
         );
 
@@ -733,5 +893,130 @@ mod tests {
         assert_eq!(portable_ver("春晓助手 1.0.2.exe"), vec![1, 0, 2]);
         // 畸形文件名不应 panic
         assert!(portable_ver("春晓助手.exe").is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // R4：悬浮球课程上下文（`docs/11` §六 阶段 2）
+    // -----------------------------------------------------------------------
+
+    /// 建一个含 settings + courses 的最小库（R4 的课程上下文只依赖这两张表）
+    fn ball_ctx_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE courses (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 name       TEXT NOT NULL,
+                 archived   INTEGER NOT NULL DEFAULT 0,
+                 created_at TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        conn
+    }
+
+    /// 课程选择的往返 + **失效值必须退化**：课程被删或换了库之后，
+    /// 若仍把旧 id 下发，球会一直显示一门不存在的课（而且材料检索会静默空手而归）。
+    #[test]
+    fn ball_course_id_roundtrip_and_invalid_values_degrade_to_none() {
+        let conn = ball_ctx_db();
+        conn.execute(
+            "INSERT INTO courses(id, name, archived, created_at) VALUES
+             (1, '数据结构', 0, '2026-01-01'), (2, '线性代数', 0, '2026-01-02')",
+            [],
+        )
+        .unwrap();
+
+        // 从没设过 → 不限定课程（**不自动套用"最近课程"**，docs/11 §一 第 3 条）
+        assert_eq!(ball_course_id(&conn), None);
+
+        set_ball_course_id(&conn, Some(1)).unwrap();
+        assert_eq!(ball_course_id(&conn), Some(1));
+
+        // 指向不存在的课程 → None
+        set_ball_course_id(&conn, Some(999)).unwrap();
+        assert_eq!(ball_course_id(&conn), None);
+
+        // 非数字垃圾值 → None（不 panic、不把垃圾当课程）
+        conn.execute(
+            "UPDATE settings SET value = 'abc' WHERE key = 'ball.course_id'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(ball_course_id(&conn), None);
+
+        // 显式取消 → None
+        set_ball_course_id(&conn, None).unwrap();
+        assert_eq!(ball_course_id(&conn), None);
+    }
+
+    /// 下拉列表顺序：未归档在前、同组按创建时间倒序（归档的沉到最后）
+    #[test]
+    fn courses_for_ball_puts_active_first_then_newest() {
+        let conn = ball_ctx_db();
+        conn.execute(
+            "INSERT INTO courses(id, name, archived, created_at) VALUES
+             (1, '归档课', 1, '2026-01-03'),
+             (2, '新课',   0, '2026-01-05'),
+             (3, '旧课',   0, '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        let names: Vec<String> = courses_for_ball(&conn)
+            .iter()
+            .map(|c| c["name"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(names, vec!["新课", "旧课", "归档课"]);
+    }
+
+    /// 载荷字段名是契约（`docs/15` §3.1）的一部分：改名会直接打断球面板
+    #[test]
+    fn ball_context_payload_field_names_are_frozen() {
+        let conn = ball_ctx_db();
+        conn.execute(
+            "INSERT INTO courses(id, name, archived, created_at) VALUES (1, '数据结构', 0, '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        set_ball_course_id(&conn, Some(1)).unwrap();
+
+        let ctx = ball_context_of(&conn);
+        assert_eq!(ctx["courseId"], 1);
+        assert_eq!(ctx["courseName"], "数据结构");
+        assert_eq!(ctx["courses"][0]["id"], 1);
+        assert_eq!(ctx["courses"][0]["name"], "数据结构");
+
+        // 没选课程时：courseId / courseName 必须是 null（球据此显示"不限定课程"）
+        set_ball_course_id(&conn, None).unwrap();
+        let ctx2 = ball_context_of(&conn);
+        assert!(ctx2["courseId"].is_null());
+        assert!(ctx2["courseName"].is_null());
+    }
+
+    /// `set_course` 不带 `text`：若 `text` 仍为必填，整条消息会**反序列化失败并被静默丢弃**
+    /// —— 那是最难查的一类缺陷（球说"已切换"，主程序毫无反应）。
+    /// 顺带确认**旧版球的载荷**（无任何新字段）照样能解析。
+    #[test]
+    fn bridge_msg_tolerates_set_course_without_text_and_legacy_payloads() {
+        let m: BridgeMsg =
+            serde_json::from_str(r#"{"ts":1,"action":"set_course","course_id":3}"#).unwrap();
+        assert_eq!(m.action, "set_course");
+        assert_eq!(m.text, "");
+        assert_eq!(m.course_id, Some(3));
+        assert!(m.answer.is_none() && m.images.is_none());
+
+        let old: BridgeMsg =
+            serde_json::from_str(r#"{"ts":2,"text":"选中文字","action":"prefill"}"#).unwrap();
+        assert_eq!(old.text, "选中文字");
+        assert!(old.course_id.is_none());
+
+        // ask 的完整形状（问题 + 回答 + 图片 + 课程）
+        let ask: BridgeMsg = serde_json::from_str(
+            r#"{"ts":3,"action":"ask","text":"这题怎么做","answer":"先求导","course_id":1,
+                "images":["data:image/png;base64,AAAA"]}"#,
+        )
+        .unwrap();
+        assert_eq!(ask.answer.as_deref(), Some("先求导"));
+        assert_eq!(ask.images.as_ref().unwrap().len(), 1);
     }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { useSettings } from "../hooks/useSettings";
+import { IMAGE_MODE_LABEL, useSettings, type ImageMode } from "../hooks/useSettings";
 import { matchPreset, PLATFORMS, type TestResult } from "../lib/ai";
+import { looksVisionCapable } from "../lib/vision";
 import { isTauri } from "../lib/tauri";
 import { resetSampleDb } from "../data/sample";
 import Icon from "../components/Icon";
@@ -18,9 +19,26 @@ import TechNote from "../components/TechNote";
  * 笔记 / 题库 / 画像 / 番茄钟为 M1+ 规划」——那是 0.5.0 之前的老黄历。
  */
 export default function Settings() {
-  const { s, hasKey, setAI, saveAI, setTheme, testAI, backupNow, restore, msg, setMsg } = useSettings();
+  const {
+    s,
+    hasKey,
+    setAI,
+    saveAI,
+    setVision,
+    saveVision,
+    setImageMode,
+    visionConfig,
+    setTheme,
+    testAI,
+    backupNow,
+    restore,
+    msg,
+    setMsg,
+  } = useSettings();
 
   const [presetKey, setPresetKey] = useState("deepseek");
+  /** R4：图片识别用的平台预设（与主模型分开选，互不干扰） */
+  const [visionPresetKey, setVisionPresetKey] = useState("");
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -59,6 +77,23 @@ export default function Settings() {
   }
 
   const preset = PLATFORMS.find((x) => x.key === presetKey);
+
+  // R4：把"现在的图片会怎么走"如实算给用户看 —— 不让他去猜为什么图片发不出去。
+  const mainModel = s.ai.model || "未填模型名";
+  const mainSees = looksVisionCapable(s.ai.model || "");
+  const visionDesc = visionConfig
+    ? `已单独指定视觉模型（${s.vision.model || "未填模型名"}）`
+    : "没有单独指定视觉模型";
+  const imageRouteHint =
+    s.imageMode === "direct"
+      ? `一律把图片直接发给主模型（${mainModel}）—— 它必须能看图，否则接口会报错。`
+      : s.imageMode === "transcribe"
+        ? `一律先转成文字：用${visionConfig ? "单独指定的视觉模型" : "主模型"}转写，再把文字交给主模型回答。`
+        : mainSees
+          ? `主模型（${mainModel}）看起来能看图 → 直接发图。`
+          : visionConfig
+            ? `主模型看起来看不了图，但${visionDesc} → 图片先转成文字，再交给主模型回答。`
+            : `主模型看起来看不了图，且${visionDesc} → 现在还发不了图片；请换成能看图的模型，或在下面单独指定一个。`;
 
   return (
     <div className="settings-page">
@@ -170,6 +205,116 @@ export default function Settings() {
             <li>
               本机数据目录：<code>%APPDATA%\com.chunxiao.study\</code>；数据库文件
               <code>chunxiao.db</code>（含课程、先验知识、材料索引、对话与作答记录）。
+            </li>
+          </ul>
+        </TechNote>
+      </section>
+
+      {/* ①-b 图片识别（可选，R4） */}
+      <section className="card">
+        <div className="section-head">
+          <h3>图片识别（可选）</h3>
+          <span className="badge">{visionConfig ? "已单独指定" : "用上面的主模型"}</span>
+        </div>
+        <p className="muted hint">
+          春晓不做本地 OCR：图片要么<b>直接交给能看图的模型</b>，要么先让一个能看图的模型
+          <b>把图转成文字</b>再问。主模型能看图时不用管这里；主模型看不了图（例如 deepseek-chat）时，
+          在这里单独指定一个能看图的模型 —— 文字问答仍用你惯用的主模型，只有图片走它。
+        </p>
+
+        <div className="form-grid">
+          <label className="wide">
+            <span>图片识别用的平台</span>
+            <select
+              value={visionPresetKey}
+              onChange={(e) => {
+                const k = e.target.value;
+                setVisionPresetKey(k);
+                const p = PLATFORMS.find((x) => x.key === k);
+                if (p && p.key !== "custom") {
+                  setVision({ baseUrl: p.baseUrl, model: p.model || "" });
+                }
+              }}
+            >
+              <option value="">（不单独指定 —— 用上面的主模型）</option>
+              {PLATFORMS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>接口地址</span>
+            <input
+              value={s.vision.baseUrl}
+              onChange={(e) => setVision({ baseUrl: e.target.value })}
+              placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            />
+          </label>
+          <label>
+            <span>模型名</span>
+            <input
+              value={s.vision.model}
+              onChange={(e) => setVision({ model: e.target.value })}
+              placeholder="例如 qwen-vl-max / gpt-4o"
+            />
+          </label>
+          <label className="wide">
+            <span>API Key（仅保存在本机）</span>
+            <input
+              type="password"
+              value={s.vision.apiKey}
+              onChange={(e) => setVision({ apiKey: e.target.value })}
+              placeholder="sk-…（留空则用上面的主模型）"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+        </div>
+
+        <div className="field" style={{ marginTop: 10 }}>
+          <span>图片提问方式</span>
+          <div className="chip-bar">
+            {(["auto", "direct", "transcribe"] as ImageMode[]).map((m) => (
+              <button
+                key={m}
+                className={"chip" + (s.imageMode === m ? " chip-active" : "")}
+                onClick={() => void setImageMode(m)}
+              >
+                {IMAGE_MODE_LABEL[m]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="btn-row">
+          <button className="ghost-btn" onClick={() => void saveVision()}>
+            <Icon name="check" />
+            保存图片识别配置
+          </button>
+        </div>
+
+        <p className="muted hint" style={{ marginTop: 10 }}>
+          <b>现在会怎么走</b>：{imageRouteHint}
+        </p>
+
+        <TechNote title="图片是怎么被「看懂」的？">
+          <ul>
+            <li>
+              <b>直接发图</b>：图片随问题一起发给模型（要求模型支持视觉）。最准，也最省事。
+            </li>
+            <li>
+              <b>先转成文字</b>：用视觉模型把图转写一遍，转写文字会标「模型转写，非原文」，
+              再连同问题交给主模型。
+            </li>
+            <li>
+              <b>自动</b>（默认）：按模型名判断主模型能不能看图；不行就看你有没有在这里指定视觉模型 ——
+              有就转写，都没有就<b>如实报错</b>，不会假装看懂了图。
+            </li>
+            <li>
+              图片会随消息保存在本机数据库里，之后还能回看；单条消息的图片总量有上限
+              （前端 3 MB 提示、后端 6 MB 硬限制）。
             </li>
           </ul>
         </TechNote>

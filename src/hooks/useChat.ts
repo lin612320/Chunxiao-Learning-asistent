@@ -17,9 +17,20 @@ import {
   type ChatSession,
   type MsgRef,
 } from "../data/sample";
-import { chatStream, systemPromptFor, type AIConfig, type ApiMsg, type AskMode } from "../lib/ai";
+import {
+  chatStream,
+  systemPromptFor,
+  type AIConfig,
+  type ApiContentPart,
+  type ApiMsg,
+  type AskMode,
+} from "../lib/ai";
 // 检索范围口径与对话页**同源**（契约 `docs/11-R1…` §一 第 2 条：界面写什么就必须按什么查）
 import { effectiveScope } from "../lib/courseScope";
+// R4：图片提问的路由（直接发图 / 先转成文字）与能力启发式判定
+import { looksVisionCapable, transcribeDataUrls } from "../lib/vision";
+import type { ImageMode } from "./useSettings";
+import { onBallPush } from "../lib/ball";
 import {
   buildMaterialBlock,
   extractSearchTermsWithInfo,
@@ -52,6 +63,13 @@ export interface UseChatOptions {
    * R1 修复点：对话页必须把 `?course=<id>` 解析后传进来，否则桌面版 `chat_sessions.course_id` 恒为 NULL。
    */
   courseId?: number | null;
+  /**
+   * R4：**可选的独立视觉模型**（三项齐全时才有值）。
+   * 主模型看不了图、又配了它 → 先用它把图转成文字，再把文字交给主模型。
+   */
+  vision?: AIConfig | null;
+  /** R4：图片提问方式（默认 `auto`） */
+  imageMode?: ImageMode;
 }
 
 /**
@@ -80,7 +98,7 @@ function nowStr(): string {
 }
 
 export function useChat(opts: UseChatOptions) {
-  const { ai, hasKey, courseId } = opts;
+  const { ai, hasKey, courseId, vision = null, imageMode = "auto" } = opts;
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentId, setCurrentId] = useState<number | null>(null);
@@ -90,6 +108,8 @@ export function useChat(opts: UseChatOptions) {
   const [sending, setSending] = useState(false);
   /** M1：正在做本机材料检索（与"模型生成中"分开显示，避免用户误以为在调模型） */
   const [searching, setSearching] = useState(false);
+  /** R4：正在把图片转成文字（走独立视觉模型）——与"模型生成中"分开显示，别让用户以为在等回答 */
+  const [imageBusy, setImageBusy] = useState(false);
   /** M2：本轮检索用了哪些词 / 命中多少（如实展示，命中 0 也要说清） */
   const [lastSearch, setLastSearch] = useState<SearchTrace | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -347,30 +367,42 @@ export function useChat(opts: UseChatOptions) {
    * - hasKey=true  → 走 lib/ai.ts 的流式接口。
    */
   const send = useCallback(
-    async (text: string, mode: AskMode = "explain", useMaterials = false): Promise<void> => {
+    async (
+      text: string,
+      mode: AskMode = "explain",
+      useMaterials = false,
+      images: string[] = [],
+    ): Promise<void> => {
       const content = text.trim();
-      if (!content || sending) return;
+      // R4：允许"只有图片、没有文字"的提问（只贴一张题图直接问，是最常见的用法）
+      if ((!content && images.length === 0) || sending) return;
+      const imgs = images.filter((s) => typeof s === "string" && s.length > 0);
 
       setError(null);
       setSending(true);
 
       let sid = currentId;
       if (sid == null) {
-        sid = await createSession(content.slice(0, 20));
+        sid = await createSession(content.slice(0, 20) || "图片提问");
       }
       if (sid == null) {
         setSending(false);
         return;
       }
 
-      const userMsg: ChatMessage = { role: "user", content, created_at: nowStr() };
+      const userMsg: ChatMessage = {
+        role: "user",
+        content,
+        created_at: nowStr(),
+        images: imgs.length > 0 ? imgs : null,
+      };
       const history = msgsRef.current;
       const withUser = [...history, userMsg];
       applyMessages(withUser);
 
       // 首条消息顺手给会话命名
       if (history.length === 0) {
-        void renameSession(sid, content.slice(0, 20));
+        void renameSession(sid, content.slice(0, 20) || "图片提问");
       }
 
       // —— M1：先查课程材料（本机检索，不联网），把来源喂给模型 ——
@@ -419,11 +451,78 @@ export function useChat(opts: UseChatOptions) {
       }
       const refsJson = serializeRefs(refs);
 
+      // —— R4：图片路由（必须在调模型之前定下来：决定"发图"还是"发文字"）——
+      //   ① 主模型看着能看图 → 直接发图；
+      //   ② 否则若配了独立视觉模型 → 先转成文字，把文字拼进提问；
+      //   ③ 都不满足 → 明确报错并给可操作建议（**绝不假装看懂了图**）；
+      //      但用户消息仍然落库 —— 图不能白贴，配好模型后还能回看。
+      let directImages: string[] = [];
+      let imageAddon = "";
+      if (imgs.length > 0) {
+        const mainLooks = looksVisionCapable(ai.model ?? "");
+        const wantTranscribe =
+          imageMode === "transcribe" || (imageMode === "auto" && !mainLooks);
+        // 要走转写时用哪套配置：优先独立视觉模型；用户明确要求"一律转写"时退回主模型
+        // （他清楚主模型能看图，只是想把图变成文字再问 —— 例如为了省 token）
+        const vcfg = vision ?? (imageMode === "transcribe" ? ai : null);
+
+        if (wantTranscribe && !vcfg) {
+          setError(
+            `这 ${imgs.length} 张图这次用不上：当前模型（${ai.model || "未填模型名"}）看不了图片，` +
+              `也没有单独配置视觉模型。两种改法：到「数据设置」把模型换成支持视觉的（如 qwen-vl / gpt-4o / glm-4v），` +
+              `或在同一页的「图片识别」里单独指定一个能看图的模型。` +
+              `图片已随这条消息保存在本机，配好之后可以回看。`,
+          );
+          try {
+            await saveMessages(sid, withUser);
+          } catch (e) {
+            setError(`消息保存失败：${errText(e)}`);
+          }
+          setSending(false);
+          return;
+        }
+
+        if (wantTranscribe && vcfg) {
+          setImageBusy(true);
+          try {
+            const results = await transcribeDataUrls(vcfg, imgs);
+            const okOnes: string[] = [];
+            const bad: string[] = [];
+            results.forEach((r, i) => {
+              if (r.ok && r.text.trim()) okOnes.push(r.text.trim());
+              else bad.push(`第 ${i + 1} 张：${r.err ?? "模型没有返回内容"}`);
+            });
+            if (okOnes.length === 0) {
+              setError(`图片没能转成文字：${bad.join("；")}`);
+              try {
+                await saveMessages(sid, withUser);
+              } catch (e) {
+                setError(`消息保存失败：${errText(e)}`);
+              }
+              setSending(false);
+              return;
+            }
+            imageAddon =
+              "\n\n【图片转写的文字 · 模型转写，非原文】\n" +
+              okOnes.map((t, i) => `（第 ${i + 1} 张）\n${t}`).join("\n\n") +
+              (bad.length > 0 ? `\n\n（另有 ${bad.length} 张没转成功：${bad.join("；")}）` : "");
+          } finally {
+            setImageBusy(false);
+          }
+        } else {
+          directImages = imgs;
+        }
+      }
+
       // —— 演示模式：不调模型 ——
       if (!hasKey) {
         const demo: ChatMessage = {
           role: "assistant",
-          content: DEMO_REPLY,
+          content:
+            imgs.length > 0
+              ? `${DEMO_REPLY}\n\n（这次还带了 ${imgs.length} 张图片：演示模式下不调用任何模型，` +
+                `所以图片没有被解析 —— 它已随这条消息保存在本机。）`
+              : DEMO_REPLY,
           refs: refsJson,
           source_kind: sourceKind,
           created_at: nowStr(),
@@ -453,12 +552,29 @@ export function useChat(opts: UseChatOptions) {
       applyMessages(base);
 
       const sys = sysExtra ? `${systemPromptFor(mode)}\n\n${sysExtra}` : systemPromptFor(mode);
+      // R4：只有**本轮**这条用户消息带图片 / 转写补充；历史一律纯文本 ——
+      //   多轮图片会把上下文与费用顶爆，且历史图对当前问题通常没有增量信息。
+      //   注意过滤条件要放行"只有图、没有文字"的消息（否则它会被整条丢掉）。
+      const trimmed = withUser.filter(
+        (m) =>
+          m.role !== "system" &&
+          (m.content.trim().length > 0 || (m.images?.length ?? 0) > 0),
+      );
       const apiMessages: ApiMsg[] = [
         { role: "system", content: sys },
-        ...withUser
-          .filter((m) => m.role !== "system" && m.content.trim().length > 0)
-          .slice(-20)
-          .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }) as ApiMsg),
+        ...trimmed.slice(-20).map((m, i, arr) => {
+          const isLast = i === arr.length - 1;
+          const text = isLast && imageAddon ? `${m.content}${imageAddon}` : m.content;
+          const use = isLast ? directImages : [];
+          if (m.role === "user" && use.length > 0) {
+            const parts: ApiContentPart[] = [
+              { type: "text", text: text || "（请看图片）" },
+              ...use.map((u) => ({ type: "image_url" as const, image_url: { url: u } })),
+            ];
+            return { role: "user", content: parts } as ApiMsg;
+          }
+          return { role: m.role === "assistant" ? "assistant" : "user", content: text } as ApiMsg;
+        }),
       ];
 
       try {
@@ -487,8 +603,61 @@ export function useChat(opts: UseChatOptions) {
         }
       }
     },
-    [ai, applyMessages, courseId, createSession, currentId, hasKey, renameSession, saveMessages, sending, sessions],
+    [
+      ai,
+      applyMessages,
+      courseId,
+      createSession,
+      currentId,
+      hasKey,
+      imageMode,
+      renameSession,
+      saveMessages,
+      sending,
+      sessions,
+      vision,
+    ],
   );
+
+  // -------------------------------------------------------------------------
+  // R4：悬浮球问答落库后的界面刷新
+  // -------------------------------------------------------------------------
+  /**
+   * 悬浮球完成一次问答时，**主程序（Rust 桥接线程）已经把消息写进库了**
+   * （见 `db::ball_append_qa`）—— 这里只负责刷新界面，不重复落库。
+   *
+   * ⚠ 分工要记牢：落库在 Rust、刷新在前端。若哪天把这句挪回前端来写库，
+   *   就会退回"球问答依赖主程序界面开着"的老问题（`docs/11` §六 G4）。
+   */
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let alive = true;
+    void (async () => {
+      const un = await onBallPush((payload) => {
+        if (payload.action !== "ask") return;
+        void (async () => {
+          try {
+            const list = await refreshSessions();
+            const sid = (payload as { session_id?: number }).session_id;
+            if (sid != null && currentIdRef.current === sid) {
+              await loadMessages(sid);
+            }
+            // 该课程下的会话列表变化（球可能新建了「悬浮球问答」会话），
+            // 但当前选中的不是它 —— 只需列表已刷新，不做任何静默跳转。
+            void list;
+          } catch (e) {
+            console.warn("[chat] 悬浮球问答落下后刷新失败：", e);
+          }
+        })();
+      });
+      if (alive) unlisten = un;
+      else un();
+    })();
+    return () => {
+      alive = false;
+      if (unlisten) unlisten();
+    };
+  }, [refreshSessions, loadMessages]);
 
   return {
     sessions,
@@ -498,6 +667,7 @@ export function useChat(opts: UseChatOptions) {
     loadingMsgs,
     sending,
     searching,
+    imageBusy,
     lastSearch,
     error,
     setError,

@@ -1,5 +1,9 @@
-// AI 接入：基于 OpenAI 兼容接口，提供翻译/关联查找/自由询问
+// AI 接入：基于 OpenAI 兼容接口，提供 关联查找 / 自由询问（**含图片**）
 // 支持流式输出，由配置中的 baseURL/apiKey/model 驱动
+//
+// R4 变更：**移除「翻译」**（用户要求：悬浮球只留「材料/关联」与「询问」）。
+//   同时给「询问」加上图片支持 —— content 可以是内容块数组（`image_url`），
+//   与主程序 `lib/ai.ts` 的 `ApiContentPart` 保持同一种形状。
 
 // HTTP 请求：优先 Electron net.fetch（Chromium 网络栈）
 // 关键差异：net.fetch 会走 Windows 系统代理并支持企业证书，
@@ -97,9 +101,6 @@ module.exports = { runTask, streamChat, normalizeBaseURL, normalizeAPIKey, endpo
 
 // 系统提示词
 const PROMPTS = {
-  translate: (text, target) =>
-    `你是一名专业翻译。请把用户给出的文本翻译为${target}。` +
-    `只输出译文，不要解释，不要附加原文。如果文本本身已是${target}，则原样输出。`,
   relate: (text) =>
     `你是一名知识关联助手。用户给出一段文本，请围绕其中关键概念做"关联查找"：` +
     `1) 用一句话解释文本主旨；` +
@@ -108,6 +109,7 @@ const PROMPTS = {
   ask: (question, context) =>
     `你是一名严谨且乐于助人的助手。根据用户的问题作答。` +
     (context ? `参考上下文：\n"""${context}"""\n` : '') +
+    `如果用户还给了图片，请结合图片内容回答（看不清就说看不清，不要猜）。` +
     `回答用 Markdown，必要时分点说明。`
 };
 
@@ -169,25 +171,37 @@ async function streamChat(cfg, messages, onChunk, signal) {
   }
 }
 
+/**
+ * 组装并执行一次任务。
+ *
+ * `kind`：
+ *   · `relate` —— 关联查找（走本机材料检索，见 panel.js 的 showRelatePlaceholder）
+ *   · 其它      —— 询问（`question` / 可选 `context` / 可选 `images`）
+ *
+ * `images` 是 dataURL 数组：有图时把 user 的 content 变成**内容块数组**
+ * （`{type:'text'}` + 若干 `{type:'image_url'}`），与主程序侧同形状。
+ */
 function runTask(cfg, kind, opts, onChunk, signal) {
   let messages;
-  if (kind === 'translate') {
-    const { text, target } = opts;
-    messages = [
-      { role: 'system', content: PROMPTS.translate(text, target) },
-      { role: 'user', content: text }
-    ];
-  } else if (kind === 'relate') {
+  if (kind === 'relate') {
     const { text } = opts;
     messages = [
       { role: 'system', content: PROMPTS.relate(text) },
       { role: 'user', content: text }
     ];
   } else {
-    const { question, context } = opts;
+    const { question, context, images } = opts;
+    const imgs = Array.isArray(images) ? images.filter((u) => typeof u === 'string' && u) : [];
+    const userContent =
+      imgs.length > 0
+        ? [
+            { type: 'text', text: question || '请看图片' },
+            ...imgs.map((url) => ({ type: 'image_url', image_url: { url } }))
+          ]
+        : question;
     messages = [
       { role: 'system', content: PROMPTS.ask(question, context) },
-      { role: 'user', content: question }
+      { role: 'user', content: userContent }
     ];
   }
   return streamChat(cfg, messages, onChunk, signal);

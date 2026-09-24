@@ -7,7 +7,7 @@
 //   launcher.show();                          // 显示小窗
 //   launcher.hide();                          // 隐藏小窗
 //   launcher.prefill('选中的文本');             // 预填文本并打开小窗
-//   launcher.run('translate', { text, target: '英文' }); // 直接跑 AI
+//   launcher.run('ask', { question: '均摊分析是什么？' }); // 直接跑 AI（R4：翻译已移除）
 //   launcher.quit();                          // 彻底退出
 //
 // 用法二（非 Node 项目，通过 spawn 命令行）：

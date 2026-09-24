@@ -155,6 +155,16 @@ export interface ChatMessage {
   refs?: string | null;
   source_kind?: string | null;
   created_at?: string | null;
+  /**
+   * R4：本轮提问携带的图片，元素是**完整 dataURL**（可直接塞 `<img src>`）。
+   *
+   * ⚠ 语义上必须能区分三件事，别把它们揉成一个：
+   *   · `undefined` —— 前端本地刚建、还没走库的对象；
+   *   · `null` —— 库里就是"没有图片"（旧消息全是这一种）；
+   *   · `[]` —— 不该出现（Rust 侧刻意把空数组落成 NULL），若出现按无图处理。
+   * 字段名与 SQLite 列名 `images` 逐字一致（Rust 侧 `ChatMsg.images` 接收）。
+   */
+  images?: string[] | null;
 }
 
 // ---------------------------------------------------------------------------

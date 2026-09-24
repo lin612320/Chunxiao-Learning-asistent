@@ -251,6 +251,61 @@ async function main() {
       const courseId = Number(Array.isArray(optionValues) ? optionValues[0] : NaN);
       ok("从界面读到一门真实课程（用于端到端断言）", Number.isInteger(courseId) && courseId > 0, `option values = ${JSON.stringify(optionValues)}`);
 
+      // ---------------- R4：图片随消息落库（真机 + 真 SQLite）----------------
+      // 直接打真 Rust 命令，不依赖 UI 时序：save 一条带图的消息 → load 回来逐字比对。
+      //   两条断言各有意义：① 图片真的进库并能取回；② **无图消息必须回 null 而不是空数组**
+      //   —— 前端要靠这个区分"这轮没图"与"图数组为空"（Rust 侧刻意这么设计）。
+      const imgRound = await session.eval(`(async () => {
+        const inv = window.__TAURI_INTERNALS__.invoke;
+        const one = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+        const sid = await inv('chat_session_create', { courseId: ${courseId}, title: 'R4图片落库自检' });
+        await inv('chat_history_save', { sessionId: sid, messages: [
+          { role: 'user', content: '看这张图', images: [one] },
+          { role: 'assistant', content: '收到', images: null }
+        ]});
+        const hist = await inv('chat_history_load', { sessionId: sid });
+        const out = {
+          n: hist.length,
+          img0: hist[0] && hist[0].images && hist[0].images[0] ? String(hist[0].images[0]).slice(0, 22) : null,
+          img1: hist[1] ? hist[1].images : 'missing'
+        };
+        // ⚠ 用完就删：这些自检会话若留着，会污染后面 R1 的「会话列表」断言
+        //   （上一版就因此让三条 R1 断言连带失败 —— 自检不该改变被测对象的状态）
+        await inv('chat_session_delete', { id: sid });
+        return out;
+      })()`);
+      ok(
+        "图片随消息真的落进 SQLite 并能取回",
+        !!(imgRound && imgRound.n === 2 && imgRound.img0 && imgRound.img0.startsWith("data:image/png")),
+        JSON.stringify(imgRound),
+      );
+      ok(
+        "无图消息回传 null（不是空数组）",
+        !!(imgRound && imgRound.img1 === null),
+        JSON.stringify(imgRound),
+      );
+
+      // 超限必须**整条拒绝**（否则单条消息就能把本机库撑到不可用）
+      const tooBig = await session.eval(`(async () => {
+        const inv = window.__TAURI_INTERNALS__.invoke;
+        const sid = await inv('chat_session_create', { courseId: ${courseId}, title: 'R4超限自检' });
+        const huge = 'data:image/png;base64,' + 'A'.repeat(6 * 1024 * 1024);
+        let res;
+        try {
+          await inv('chat_history_save', { sessionId: sid, messages: [{ role: 'user', content: '超大图', images: [huge] }] });
+          res = { threw: false };
+        } catch (e) {
+          res = { threw: true, msg: String(e) };
+        }
+        await inv('chat_session_delete', { id: sid }); // 同上：不留痕迹
+        return res;
+      })()`);
+      ok(
+        "超过 6 MB 的图片被整条拒绝并给出可读错误",
+        !!(tooBig && tooBig.threw && /图片太大/.test(tooBig.msg || "")),
+        JSON.stringify(tooBig),
+      );
+
       const stamp = Date.now().toString().slice(-6);
       const question = `R1冒烟课程归属${stamp}`;
       /** 只读**会话列表栏**（不是课程上下文栏）里的文本 */

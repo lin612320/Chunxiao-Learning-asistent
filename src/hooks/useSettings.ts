@@ -7,7 +7,7 @@
 // API Key：桌面版把**明文**交给 Rust，由 Rust 侧 keycrypt.rs 混淆（`enc.` 前缀）后落盘；
 //          浏览器预览没有 Rust，则由本层先用 lib/secret.ts 混淆再进 localStorage。
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invokeStrict, isTauri } from "../lib/tauri";
 import { decryptSecret, encryptSecret } from "../lib/secret";
 import { testConnection, type AIConfig, type TestResult } from "../lib/ai";
@@ -17,14 +17,36 @@ export const KEYS = {
   aiBaseUrl: "ai.base_url",
   aiApiKey: "ai.api_key",
   aiModel: "ai.model",
+  // R4：**可选的独立视觉模型** —— 主模型看不了图时，用它把图转成文字。
+  // 三项全空 = 复用主模型（此时"转写"能不能成，取决于主模型本身看不看得懂图）。
+  aiVisionBaseUrl: "ai.vision_base_url",
+  aiVisionApiKey: "ai.vision_api_key",
+  aiVisionModel: "ai.vision_model",
+  // R4：图片提问方式（auto=自动 / direct=直接发图 / transcribe=先转成文字）
+  imageMode: "ai.image_mode",
   theme: "theme",
 } as const;
 
 /** 需加密落盘的设置键（仅浏览器预览路径生效） */
-const SECRET_KEYS: string[] = [KEYS.aiApiKey];
+const SECRET_KEYS: string[] = [KEYS.aiApiKey, KEYS.aiVisionApiKey];
 const isSecretKey = (k: string) => SECRET_KEYS.includes(k);
 
 export type Theme = "light" | "dark";
+
+/**
+ * 图片提问方式（R4）。
+ *   · `auto`（默认）：模型名看起来能看图就直接发图；否则若配了视觉模型就先转写；
+ *     两者都不满足 → 明确报错并给可操作建议；
+ *   · `direct`：一律直接发图（用户知道自己的模型能看图，但名字不像）；
+ *   · `transcribe`：一律先转成文字（省 token、或想让纯文本主模型也能用）。
+ */
+export type ImageMode = "auto" | "direct" | "transcribe";
+
+export const IMAGE_MODE_LABEL: Record<ImageMode, string> = {
+  auto: "自动",
+  direct: "直接发图",
+  transcribe: "先转成文字",
+};
 
 export const LS_SETTINGS = "chunxiao:settings";
 export const LS_THEME = "chunxiao:theme";
@@ -34,6 +56,10 @@ export const THEME_EVENT = "chunxiao:theme-changed";
 export interface SettingsState {
   loaded: boolean;
   ai: { baseUrl: string; apiKey: string; model: string };
+  /** R4：可选的独立视觉模型（全空 = 复用 `ai`） */
+  vision: { baseUrl: string; apiKey: string; model: string };
+  /** R4：图片提问方式 */
+  imageMode: ImageMode;
   theme: Theme;
 }
 
@@ -41,6 +67,8 @@ const DEFAULTS: SettingsState = {
   loaded: false,
   // 首启默认给 DeepSeek（BYOK 第一屏的推荐项），用户可在设置页换成其它平台
   ai: { baseUrl: "https://api.deepseek.com", apiKey: "", model: "deepseek-chat" },
+  vision: { baseUrl: "", apiKey: "", model: "" },
+  imageMode: "auto",
   theme: "light",
 };
 
@@ -117,7 +145,16 @@ export function useSettings() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const keys: string[] = [KEYS.aiBaseUrl, KEYS.aiApiKey, KEYS.aiModel, KEYS.theme];
+      const keys: string[] = [
+        KEYS.aiBaseUrl,
+        KEYS.aiApiKey,
+        KEYS.aiModel,
+        KEYS.aiVisionBaseUrl,
+        KEYS.aiVisionApiKey,
+        KEYS.aiVisionModel,
+        KEYS.imageMode,
+        KEYS.theme,
+      ];
       const map: Record<string, string> = {};
 
       if (isTauri()) {
@@ -146,6 +183,7 @@ export function useSettings() {
       applyTheme(theme);
 
       if (!alive) return;
+      const rawMode = map[KEYS.imageMode];
       setS({
         loaded: true,
         ai: {
@@ -153,6 +191,13 @@ export function useSettings() {
           apiKey: map[KEYS.aiApiKey] ?? DEFAULTS.ai.apiKey,
           model: map[KEYS.aiModel] ?? DEFAULTS.ai.model,
         },
+        vision: {
+          baseUrl: map[KEYS.aiVisionBaseUrl] ?? "",
+          apiKey: map[KEYS.aiVisionApiKey] ?? "",
+          model: map[KEYS.aiVisionModel] ?? "",
+        },
+        // 非法值一律回落到 auto，不把垃圾值带进逻辑分支
+        imageMode: rawMode === "direct" || rawMode === "transcribe" ? rawMode : "auto",
         theme,
       });
     })();
@@ -195,8 +240,66 @@ export function useSettings() {
     }
   }, [persist, s.ai]);
 
-  /** 切换主题（立即生效 + 落盘 settings.theme） */
-  const setTheme = useCallback(
+  /** 仅改内存态：独立视觉模型三项（输入框即时反馈，不落盘） */
+  const setVision = useCallback((patch: Partial<SettingsState["vision"]>) => {
+    setS((prev) => ({ ...prev, vision: { ...prev.vision, ...patch } }));
+  }, []);
+
+  /** 显式保存视觉模型三项；三项留空 = 清除（表示"复用主模型"） */
+  const saveVision = useCallback(async (): Promise<boolean> => {
+    try {
+      await persist(KEYS.aiVisionBaseUrl, s.vision.baseUrl.trim());
+      await persist(KEYS.aiVisionApiKey, s.vision.apiKey.trim());
+      await persist(KEYS.aiVisionModel, s.vision.model.trim());
+      setMsg({
+        type: "ok",
+        text:
+          s.vision.baseUrl.trim() && s.vision.apiKey.trim()
+            ? "图片识别配置已保存在本机。"
+            : "已清空图片识别配置：图片提问将改用上面的主模型。",
+      });
+      return true;
+    } catch (e) {
+      setMsg({
+        type: "err",
+        text: `保存失败：${e instanceof Error ? e.message : String(e)}`,
+      });
+      return false;
+    }
+  }, [persist, s.vision]);
+
+  /** 切换图片提问方式（立即生效 + 落盘） */
+  const setImageMode = useCallback(
+    async (m: ImageMode) => {
+      setS((prev) => ({ ...prev, imageMode: m }));
+      try {
+        await persist(KEYS.imageMode, m);
+      } catch (e) {
+        setMsg({
+          type: "err",
+          text: `图片提问方式已切换，但写入设置失败：${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    },
+    [persist],
+  );
+
+  /**
+   * 独立视觉模型的配置：**只在三项都齐时**返回（缺一项就当没配）。
+   *
+   * 为什么要求 base+key 都齐：只填了模型名却没地址/Key 时，若仍返回它，
+   * 转写会在"用了一个空地址"上失败 —— 那种失败信息对用户毫无意义。
+   * 返回 null 表示"没有独立视觉模型"，由调用方决定是否复用主模型。
+   */
+  const visionConfig: AIConfig | null = useMemo(() => {
+    const { baseUrl, apiKey, model } = s.vision;
+    if (baseUrl.trim() && apiKey.trim()) {
+      return { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), model: model.trim() || undefined };
+    }
+    return null;
+  }, [s.vision]);
+
+  /** 切换主题（立即生效 + 落盘 settings.theme） */  const setTheme = useCallback(
     async (t: Theme) => {
       setS((prev) => ({ ...prev, theme: t }));
       applyTheme(t);
@@ -262,6 +365,10 @@ export function useSettings() {
     hasKey,
     setAI,
     saveAI,
+    setVision,
+    saveVision,
+    setImageMode,
+    visionConfig,
     setTheme,
     testAI,
     backupNow,

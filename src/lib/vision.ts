@@ -97,6 +97,80 @@ export function contentBlockFor(fileName: string, base64: string): ApiContentPar
 }
 
 // ---------------------------------------------------------------------------
+// R4：图片提问 —— 能力判定与转写
+// ---------------------------------------------------------------------------
+
+/**
+ * 常见「能看图」模型的名称特征（用于「自动」模式判定）。
+ *
+ * ⚠ 这是**启发式**，不是能力探测：真正的能力探测得发一次请求才准。
+ * 函数名刻意叫 `looks*` 而不是 `is*` —— 猜错的代价只是"多发一次带图片的请求"
+ * （模型不支持时接口会报错，界面如实显示），因此设置页给了用户**显式覆盖**
+ * （自动 / 直接发图 / 先转成文字），不靠猜。
+ */
+const VISION_MODEL_HINTS = [
+  "vl",
+  "vision",
+  "gpt-4o",
+  "gpt-4.1",
+  "gpt-5",
+  "claude",
+  "gemini",
+  "glm-4v",
+  "glm-4.5v",
+  "llava",
+  "internvl",
+  "minicpm-v",
+  "pixtral",
+  "doubao-vision",
+  "step-1v",
+];
+
+/** 模型名看起来能不能看图（见上：启发式，不保证准确） */
+export function looksVisionCapable(model: string): boolean {
+  const m = (model || "").toLowerCase();
+  if (!m) return false;
+  return VISION_MODEL_HINTS.some((h) => m.includes(h));
+}
+
+/**
+ * 给 dataURL 造一个**假文件名**，只为让 `contentBlockFor` 推导出正确 MIME。
+ *
+ * 为什么不直接写 "图片.png"：粘贴进来的可能是 JPEG，而 `mimeOf` 是**按扩展名**判断的 ——
+ * 名字写着 png、实际是 jpeg 时，发给模型的内容块 MIME 就错了（部分平台会因此拒收）。
+ */
+export function fileNameForDataUrl(dataUrl: string, index: number): string {
+  const m = /^data:([^;,]+)[;,]/.exec((dataUrl || "").trim());
+  const mime = (m?.[1] ?? "image/png").toLowerCase();
+  const ext = mime === "image/jpeg" ? "jpg" : mime.startsWith("image/") ? mime.slice(6) : "png";
+  return `粘贴图片${index + 1}.${ext}`;
+}
+
+export interface ImageTranscript {
+  ok: boolean;
+  text: string;
+  err?: string;
+}
+
+/**
+ * 用视觉模型把一批 dataURL 逐张转写成文字。
+ *
+ * 这是「主模型看不了图」时的兜底路径：转写结果会**原样**拼进提问文本，
+ * 并由调用方明确标注「图片已转成文字（模型转写，非原文）」—— 不冒充原文。
+ */
+export async function transcribeDataUrls(
+  cfg: AIConfig,
+  dataUrls: string[],
+): Promise<ImageTranscript[]> {
+  const out: ImageTranscript[] = [];
+  for (let i = 0; i < dataUrls.length; i++) {
+    const r = await transcribeWithModel(cfg, fileNameForDataUrl(dataUrls[i], i), dataUrls[i]);
+    out.push({ ok: r.ok, text: r.text, err: r.err });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // 主入口
 // ---------------------------------------------------------------------------
 

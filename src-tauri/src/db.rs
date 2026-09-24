@@ -391,6 +391,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "chat_sessions", "updated_at", "TEXT")?;
     ensure_column(conn, "chat_messages", "refs", "TEXT")?;
     ensure_column(conn, "chat_messages", "source_kind", "TEXT")?;
+    // `chat_messages.images`（R4）：本轮提问携带的图片，JSON 数组、元素是完整 dataURL。
+    //   刻意允许 NULL —— 旧消息没有这个值，前端必须能区分"没有图"与"图数组为空"。
+    //   单条消息的图片总量在写入侧有硬上限（见 CHAT_IMAGES_MAX_BYTES），避免单条消息撑爆库。
+    ensure_column(conn, "chat_messages", "images", "TEXT")?;
     ensure_column(conn, "materials", "note", "TEXT")?;
     ensure_column(conn, "materials", "truncated", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_column(conn, "course_prior", "verified", "INTEGER NOT NULL DEFAULT 0")?;
@@ -1515,6 +1519,7 @@ fn char_byte_index(s: &str, nth: usize) -> usize {
 /// 一条 AI 对话消息（与前端 ChatMsg 对应）。
 /// `refs` / `source_kind` 用 Value 接收：前端可能传字符串，也可能传引用数组，
 /// 都能落库，不会因为形状不一致把整段对话存坏。
+/// `images`（R4）：本轮提问携带的图片，**dataURL 字符串数组**（`data:image/jpeg;base64,…`）。
 #[derive(Debug, serde::Deserialize)]
 pub struct ChatMsg {
     pub role: String,
@@ -1523,6 +1528,55 @@ pub struct ChatMsg {
     pub source_kind: Option<Value>,
     #[serde(default)]
     pub refs: Option<Value>,
+    #[serde(default)]
+    pub images: Option<Value>,
+}
+
+/// 单条消息里图片（JSON 序列化后）的硬上限，**6 MB**。
+///
+/// 为什么必须有：图片是 dataURL（base64 比原图大约 1/3），一张未压缩的手机截图动辄 2–4 MB，
+/// 若不在写入侧兜住，单条消息就能把本机数据库撑到不可用。前端另有一道更严的提示（>3 MB 直接
+/// 拒绝并让用户重截），这里的硬上限是**最后一道防线**：只保证库不被写坏，不管体验。
+const CHAT_IMAGES_MAX_BYTES: usize = 6 * 1024 * 1024;
+
+/// 把前端传来的 `images` 规范化成**待落库的 JSON 文本**（无图 / 非法形状 → `None`）。
+///
+/// 接受的形状：`["data:image/png;base64,…", …]`（字符串数组）。
+/// 非字符串元素、非数组一律按"没有图片"处理 —— 宁可少存图，也不因为一个坏元素
+/// 让整段对话保存失败（对话落库是主链路，不能图片格式问题连坐）。
+fn images_text(v: &Option<Value>) -> Result<Option<String>, String> {
+    let Some(v) = v else { return Ok(None) };
+    let Value::Array(items) = v else { return Ok(None) };
+    let list: Vec<&str> = items
+        .iter()
+        .filter_map(|it| match it {
+            Value::String(s) if !s.trim().is_empty() => Some(s.as_str()),
+            _ => None,
+        })
+        .collect();
+    if list.is_empty() {
+        return Ok(None);
+    }
+    let text = serde_json::to_string(&list).map_err(|e| format!("图片序列化失败：{e}"))?;
+    if text.len() > CHAT_IMAGES_MAX_BYTES {
+        return Err(format!(
+            "这条消息的图片太大了（{:.1} MB，上限 {:.0} MB）：请重新截小一点，或先压缩再粘贴。",
+            text.len() as f64 / 1024.0 / 1024.0,
+            CHAT_IMAGES_MAX_BYTES as f64 / 1024.0 / 1024.0
+        ));
+    }
+    Ok(Some(text))
+}
+
+/// 库里存的 images JSON 文本 → **解析后的数组**（给前端直接用；解析失败按"没有图片"）。
+///
+/// 与 `refs` 的取舍不同：`refs` 原样回传字符串由前端解析，而 images 直接回数组 ——
+/// 前端要用它渲染 `<img src>`，回数组可以少一处解析、也少一处解析失败的可能。
+fn images_value(stored: Option<String>) -> Value {
+    match stored {
+        Some(s) if !s.trim().is_empty() => serde_json::from_str::<Value>(&s).unwrap_or(Value::Null),
+        _ => Value::Null,
+    }
 }
 
 /// Value → 存库文本（字符串原样，null → NULL，其它形状序列化为 JSON 文本）
@@ -1657,7 +1711,7 @@ pub fn chat_session_delete(conn: &Connection, id: i64) -> Result<(), String> {
 pub fn chat_history_load(conn: &Connection, session_id: i64) -> Result<Vec<Value>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT role, content, refs, source_kind, created_at
+            "SELECT role, content, refs, source_kind, created_at, images
              FROM chat_messages WHERE session_id = ?1 ORDER BY id",
         )
         .map_err(friendly)?;
@@ -1669,6 +1723,8 @@ pub fn chat_history_load(conn: &Connection, session_id: i64) -> Result<Vec<Value
                 "refs": r.get::<_, Option<String>>(2)?,
                 "source_kind": r.get::<_, Option<String>>(3)?,
                 "created_at": r.get::<_, String>(4)?,
+                // R4：图片直接回**数组**（None/旧库为 NULL → null），前端拿去渲染 <img src>
+                "images": images_value(r.get::<_, Option<String>>(5)?),
             }))
         })
         .map_err(friendly)?;
@@ -1804,20 +1860,28 @@ pub fn chat_history_save(
     }
 
     let now = chrono::Local::now().to_rfc3339();
+    // 图片先整体校验（超限直接整条拒绝，给出可读中文错误），再进事务 ——
+    // 不要在事务里才发现某条超限，那样前半截已经写进去了。
+    let images_cols: Vec<Option<String>> = messages
+        .iter()
+        .map(|m| images_text(&m.images))
+        .collect::<Result<Vec<_>, _>>()?;
+
     let tx = conn.unchecked_transaction().map_err(friendly)?;
     tx.execute("DELETE FROM chat_messages WHERE session_id = ?1", [session_id])
         .map_err(friendly)?;
-    for m in messages {
+    for (m, images) in messages.iter().zip(images_cols.iter()) {
         tx.execute(
-            "INSERT INTO chat_messages(session_id, role, content, refs, source_kind, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO chat_messages(session_id, role, content, refs, source_kind, created_at, images)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 session_id,
                 m.role,
                 m.content,
                 json_text(&m.refs),
                 json_text(&m.source_kind),
-                now
+                now,
+                images
             ],
         )
         .map_err(friendly)?;
@@ -1828,6 +1892,101 @@ pub fn chat_history_save(
     )
     .map_err(friendly)?;
     tx.commit().map_err(friendly)
+}
+
+/// 悬浮球问答落库（R4；关闭 `docs/11` §六 登记的缺口 G4）。
+///
+/// **为什么放在 Rust 而不是前端挂 `onBallPush`**：球面板是**独立 Electron 应用**，
+/// 它的问答不该依赖"主程序里正好有某个页面打开着"。这里由桥接轮询线程直接写库，
+/// 再把结果 emit 给前端做刷新 —— 关掉主程序界面也不会丢问答（比原计划的方案更稳）。
+///
+/// 口径：
+///   · `course_id` 指定时，用该课程**最近更新**的会话；没有就新建一个（标题「悬浮球问答」）；
+///   · `course_id` 指向的课程**不存在**时，退化为「不限定课程」并打日志 ——
+///     不因为一个失效的课程 id 把这次问答整条丢掉（用户的问题已经问完了，答案就在手里）；
+///   · 写入 `user`（问题 + 图片）与 `assistant`（回答）两条，`source_kind` 固定 `ball_ask` 以便溯源。
+///
+/// 返回落库所用的 `session_id`（供调用方 emit 给前端定位会话）。
+pub fn ball_append_qa(
+    conn: &Connection,
+    course_id: Option<i64>,
+    question: &str,
+    answer: &str,
+    images: &[String],
+) -> Result<i64, String> {
+    // 课程不存在 → 退化为「不限定课程」（见上：不能丢问答）
+    let course_id = match course_id {
+        Some(cid) => {
+            let ok: bool = conn
+                .query_row("SELECT 1 FROM courses WHERE id = ?1", [cid], |_| Ok(()))
+                .is_ok();
+            if ok {
+                Some(cid)
+            } else {
+                eprintln!("[ball] 课程 id={cid} 不存在，本次问答按「不限定课程」落库");
+                None
+            }
+        }
+        None => None,
+    };
+
+    let latest: Option<i64> = match course_id {
+        Some(cid) => conn
+            .query_row(
+                "SELECT id FROM chat_sessions WHERE course_id = ?1
+                 ORDER BY COALESCE(updated_at, created_at) DESC, id DESC LIMIT 1",
+                [cid],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(friendly)?,
+        None => conn
+            .query_row(
+                "SELECT id FROM chat_sessions WHERE course_id IS NULL
+                 ORDER BY COALESCE(updated_at, created_at) DESC, id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(friendly)?,
+    };
+
+    let now = chrono::Local::now().to_rfc3339();
+    // 与 chat_history_save 共用同一道图片上限（超限给出可读中文错误）
+    let images_json = images_text(&Some(json!(images)))?;
+
+    let tx = conn.unchecked_transaction().map_err(friendly)?;
+    let sid = match latest {
+        Some(id) => id,
+        None => {
+            tx.execute(
+                "INSERT INTO chat_sessions(course_id, title, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?3)",
+                rusqlite::params![course_id, "悬浮球问答", now],
+            )
+            .map_err(friendly)?;
+            tx.last_insert_rowid()
+        }
+    };
+    tx.execute(
+        "INSERT INTO chat_messages(session_id, role, content, refs, source_kind, created_at, images)
+         VALUES (?1, 'user', ?2, NULL, 'ball_ask', ?3, ?4)",
+        rusqlite::params![sid, question, now, images_json],
+    )
+    .map_err(friendly)?;
+    tx.execute(
+        "INSERT INTO chat_messages(session_id, role, content, refs, source_kind, created_at, images)
+         VALUES (?1, 'assistant', ?2, NULL, 'ball_ask', ?3, NULL)",
+        rusqlite::params![sid, answer, now],
+    )
+    .map_err(friendly)?;
+    tx.execute(
+        "UPDATE chat_sessions SET updated_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, sid],
+    )
+    .map_err(friendly)?;
+    tx.commit().map_err(friendly)?;
+    Ok(sid)
 }
 
 /// 写入会话摘要（供画像与笔记复用）
@@ -3719,12 +3878,14 @@ mod tests {
                     content: "什么是秩？".into(),
                     source_kind: Some(json!("ball_manual")),
                     refs: Some(json!([{"kind": "chunk", "id": 1}])),
+                    images: Some(json!(["data:image/jpeg;base64,AAAA"])),
                 },
                 ChatMsg {
                     role: "assistant".into(),
                     content: "秩是……".into(),
                     source_kind: None,
                     refs: None,
+                    images: None,
                 },
             ],
         )
@@ -3734,6 +3895,14 @@ mod tests {
         assert_eq!(hist[0]["role"], "user");
         assert_eq!(hist[0]["source_kind"], "ball_manual");
         assert!(hist[0]["refs"].as_str().unwrap().contains("chunk"));
+        // R4：图片往返（回传的是**数组**，前端拿它渲染 <img src>）
+        assert_eq!(hist[0]["images"][0], "data:image/jpeg;base64,AAAA");
+        // 无图消息必须是 null 而不是空数组：前端要能区分"这轮没图"与"图数组为空"
+        assert!(
+            hist[1]["images"].is_null(),
+            "无图消息的 images 必须是 null，实际是 {}",
+            hist[1]["images"]
+        );
         chat_session_summary_set(&conn, sid, "讨论了秩的定义").unwrap();
         let sessions = chat_sessions_list(&conn, Some(cid)).unwrap();
         assert_eq!(sessions.len(), 1);
@@ -3742,6 +3911,92 @@ mod tests {
 
         chat_session_delete(&conn, sid).unwrap();
         assert!(chat_history_load(&conn, sid).unwrap().is_empty());
+    }
+
+    /// R4：图片超限必须**整条拒绝**并给可读中文错误（而不是悄悄截断或写坏库）。
+    #[test]
+    fn chat_images_over_hard_limit_are_rejected_with_readable_error() {
+        let conn = mem();
+        let sid = chat_session_create(&conn, None, "大图").unwrap();
+        // 造一张"图片"：base64 串长度直接过线（内容本身无意义，只测长度判定）
+        let huge = format!("data:image/jpeg;base64,{}", "A".repeat(CHAT_IMAGES_MAX_BYTES));
+        let err = chat_history_save(
+            &conn,
+            sid,
+            &[ChatMsg {
+                role: "user".into(),
+                content: "很大的一张图".into(),
+                source_kind: None,
+                refs: None,
+                images: Some(json!([huge])),
+            }],
+        )
+        .expect_err("超过 6 MB 上限时必须报错");
+        assert!(
+            err.contains("图片太大") && err.contains("MB"),
+            "错误信息要可读并带上上限，实际：{err}"
+        );
+        // 整条被拒绝：不能留下半截消息（先校验后写事务）
+        assert!(chat_history_load(&conn, sid).unwrap().is_empty());
+    }
+
+    /// R4：非字符串 / 非数组的 images 一律按"没有图片"处理 ——
+    /// 对话落库是主链路，不能因为一个坏元素让整段对话保存失败。
+    #[test]
+    fn chat_images_tolerate_malformed_shapes() {
+        let conn = mem();
+        let sid = chat_session_create(&conn, None, "坏图").unwrap();
+        chat_history_save(
+            &conn,
+            sid,
+            &[ChatMsg {
+                role: "user".into(),
+                content: "形状不对的图片字段".into(),
+                source_kind: None,
+                refs: None,
+                images: Some(json!(["", { "not": "a string" }, 42])),
+            }],
+        )
+        .unwrap();
+        let hist = chat_history_load(&conn, sid).unwrap();
+        assert!(hist[0]["images"].is_null(), "非法形状应落成 null");
+    }
+
+    /// R4：悬浮球问答落库 —— 第一次新建会话、第二次复用同一个，
+    /// 并且**课程不存在时退化为「不限定课程」**而不是把问答丢掉。
+    #[test]
+    fn ball_append_qa_creates_then_reuses_session_and_survives_bad_course() {
+        let conn = mem();
+        let cid = course_create(&conn, "数据结构", None, None, None).unwrap();
+        let imgs = vec!["data:image/png;base64,BBBB".to_string()];
+
+        let s1 = ball_append_qa(&conn, Some(cid), "什么是摊还分析？", "摊还分析是……", &imgs).unwrap();
+        let s2 = ball_append_qa(&conn, Some(cid), "再举个例子", "比如动态数组……", &[]).unwrap();
+        assert_eq!(s1, s2, "同一课程的第二次问答应复用同一个会话");
+
+        let hist = chat_history_load(&conn, s1).unwrap();
+        assert_eq!(hist.len(), 4, "两次问答 = 4 条消息");
+        assert_eq!(hist[0]["role"], "user");
+        assert_eq!(hist[0]["content"], "什么是摊还分析？");
+        assert_eq!(hist[0]["images"][0], "data:image/png;base64,BBBB");
+        assert_eq!(hist[0]["source_kind"], "ball_ask");
+        assert_eq!(hist[1]["role"], "assistant");
+        // 会话确实挂在这门课上，标题可辨认
+        let sessions = chat_sessions_list(&conn, Some(cid)).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["title"], "悬浮球问答");
+
+        // 不存在的课程 → 退化为「不限定课程」，问答照样落库（不能丢）
+        let s3 = ball_append_qa(&conn, Some(999_999), "失效课程的提问", "回答照旧", &[]).unwrap();
+        assert_ne!(s3, s1, "退化后应落到另一个（不限定课程的）会话");
+        let hist3 = chat_history_load(&conn, s3).unwrap();
+        assert_eq!(hist3.len(), 2);
+        assert_eq!(hist3[0]["content"], "失效课程的提问");
+        let no_course = chat_sessions_list(&conn, None).unwrap();
+        assert!(
+            no_course.iter().any(|s| s["id"] == s3 && s["course_id"].is_null()),
+            "退化后的会话必须 course_id = NULL"
+        );
     }
 
     #[test]

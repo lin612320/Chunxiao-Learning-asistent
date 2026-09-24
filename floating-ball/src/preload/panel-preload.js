@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('api', {
   testKey: (cfg) => ipcRenderer.invoke('ai:testKey', cfg),
   pushToApp: (text, action) => ipcRenderer.invoke('app:push', { text, action }),
   askMaterialSearch: (text) => ipcRenderer.invoke('material:ask', { text }),
+  // R4：课程上下文（R1 阶段 2）+ 问答回推落库
+  setCourse: (courseId) => ipcRenderer.invoke('course:set', { courseId }),
+  pushAsk: (payload) => ipcRenderer.invoke('app:pushAsk', payload),
 
   onTaskChunk: (cb) => ipcRenderer.on('task:chunk', (_e, p) => cb(p)),
   onTaskDone: (cb) => ipcRenderer.on('task:done', (_e, p) => cb(p)),
@@ -24,5 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   onApplyTheme: (cb) => ipcRenderer.on('apply-theme', (_e, theme) => cb(theme)),
   onExternalRunTask: (cb) => ipcRenderer.on('external:runTask', (_e, p) => cb(p)),
   onMaterialResult: (cb) => ipcRenderer.on('material:result', (_e, p) => cb(p)),
-  onConfigSynced: (cb) => ipcRenderer.on('config:synced', (_e, p) => cb(p))
+  onConfigSynced: (cb) => ipcRenderer.on('config:synced', (_e, p) => cb(p)),
+  // R4：主程序下发的课程列表与当前课程
+  onCourses: (cb) => ipcRenderer.on('courses:sync', (_e, p) => cb(p))
 });
