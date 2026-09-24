@@ -245,8 +245,11 @@ async function main() {
       ok("课程上下文栏存在且唯一（.chat-scope-bar = 1）", scopeBars === 1, `实际 ${scopeBars} 个`);
       ok("会话列表栏存在且唯一（.session-bar = 1）", sessionBars === 1, `实际 ${sessionBars} 个`);
 
+      // R6：课程列表现在**读侧栏的课程选择器**（`.course-picker select`）。
+      //   对话页那个「在聊哪门课」下拉已删（课程由侧栏 + 顶栏胶囊负责，页内再放就是三处重复），
+      //   所以这里必须改口径 —— 否则读不到课程 id，后面三条断言全部连带假失败。
       const optionValues = await session.eval(
-        `[...document.querySelectorAll('.chat-scope-bar select option')].map(o => o.value).filter(v => v !== '')`,
+        `[...document.querySelectorAll('.course-picker select option, .chat-scope-bar select option')].map(o => o.value).filter(v => v !== '')`,
       );
       const courseId = Number(Array.isArray(optionValues) ? optionValues[0] : NaN);
       ok("从界面读到一门真实课程（用于端到端断言）", Number.isInteger(courseId) && courseId > 0, `option values = ${JSON.stringify(optionValues)}`);

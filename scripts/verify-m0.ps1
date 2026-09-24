@@ -15,6 +15,10 @@
 #   8. 桌面真机 UI 冒烟  真 WebView2 + 真 Tauri IPC + 真 SQLite 驱动**桌面应用**，
 #                     补 docs/09 §四 T17：预览模式抓不到"前端没把参数传给 Rust"这类
 #                     接线缺陷。该步自行隔离数据库、用完自动还原（详见脚本头部说明）
+#   9. 悬浮球面板版面守门 无头 Edge 渲染 **panel.html 本身**，断言两个输入框 / 两个按钮 /
+#                     抓取模式按钮都**完整落在窗口内**且互不重叠。前 8 步都碰不到它：
+#                     它们的对象是数据与主程序，没有任何一层渲染过面板（0.7.0 的
+#                     "收起后按钮被裁到窗口外"逃过了全部 8 步，就是缺这一层）
 
 param(
   [switch]$SkipCargo,  # 只想快速验前端时用
@@ -48,7 +52,7 @@ function Step([string]$name, [scriptblock]$body) {
 }
 
 # ---------- 1. 前端类型检查 ----------
-Step "1/8 前端类型检查 tsc --noEmit" {
+Step "1/9 前端类型检查 tsc --noEmit" {
   Push-Location $Root
   $out = & npx tsc --noEmit 2>&1
   $code = $LASTEXITCODE
@@ -58,7 +62,7 @@ Step "1/8 前端类型检查 tsc --noEmit" {
 }
 
 # ---------- 2. 前端构建 ----------
-Step "2/8 前端构建 vite build" {
+Step "2/9 前端构建 vite build" {
   Push-Location $Root
   $out = & npx vite build 2>&1
   $code = $LASTEXITCODE
@@ -69,7 +73,7 @@ Step "2/8 前端构建 vite build" {
 
 # ---------- 3. Rust 静态检查 ----------
 if (-not $SkipCargo) {
-  Step "3/8 Rust 静态检查 cargo check" {
+  Step "3/9 Rust 静态检查 cargo check" {
     Push-Location (Join-Path $Root "src-tauri")
     $out = & cargo check 2>&1
     $code = $LASTEXITCODE
@@ -85,7 +89,7 @@ if (-not $SkipCargo) {
 }
 
 # ---------- 4. 图标资产回读 ----------
-Step "4/8 图标资产回读" {
+Step "4/9 图标资产回读" {
   Add-Type -AssemblyName System.Drawing
   $iconsDir = Join-Path $Root "src-tauri\icons"
   $expect = @{ "32x32.png" = 32; "64x64.png" = 64; "128x128.png" = 128; "128x128@2x.png" = 256; "icon.png" = 512 }
@@ -118,7 +122,7 @@ Step "4/8 图标资产回读" {
 }
 
 # ---------- 5. 品牌残留扫描 ----------
-Step "5/8 品牌残留扫描（floating-ball/src）" {
+Step "5/9 品牌残留扫描（floating-ball/src）" {
   $dir = Join-Path $Root "floating-ball\src"
   $hits = Get-ChildItem -Recurse $dir -File -Include *.js,*.html |
     Select-String -Pattern '律政|法元|legal-workbench|floating-ball|laws|法条|法库|法规'
@@ -129,7 +133,7 @@ Step "5/8 品牌残留扫描（floating-ball/src）" {
 }
 
 # ---------- 6. 脚本编码检查 ----------
-Step "6/8 PowerShell 脚本编码（UTF-8 BOM）" {
+Step "6/9 PowerShell 脚本编码（UTF-8 BOM）" {
   $dir = Join-Path $Root "scripts"
   $bad = @()
   $all = @(Get-ChildItem -Path $dir -Filter *.ps1 -File -ErrorAction SilentlyContinue)
@@ -146,7 +150,7 @@ Step "6/8 PowerShell 脚本编码（UTF-8 BOM）" {
 # 它抓到过其它层都抓不到的问题（例如缺 favicon 导致每次加载 404）。
 # 环境不可用（未装 Edge / 服务起不来）时明确记 SKIP，**不冒充通过**。
 if (-not $SkipUI) {
-  Step "7/8 浏览器层 UI 冒烟（Edge 无头 + CDP）" {
+  Step "7/9 浏览器层 UI 冒烟（Edge 无头 + CDP）" {
     Push-Location $Root
     $out = & powershell -NoProfile -File (Join-Path $Root "scripts\smoke-ui.ps1") 2>&1
     $code = $LASTEXITCODE
@@ -169,7 +173,7 @@ if (-not $SkipUI) {
 # 本步驱动**真桌面应用**（真 WebView2 + 真 Tauri IPC + 真 SQLite），并自行隔离数据库、用完还原。
 # 环境不可用（未编译 exe / vite 或 CDP 起不来 / 主程序正在运行）时 exit 2 → 记 SKIP，**不冒充通过**。
 if (-not $SkipUI) {
-  Step "8/8 桌面真机 UI 冒烟（WebView2 + CDP）" {
+  Step "8/9 桌面真机 UI 冒烟（WebView2 + CDP）" {
     Push-Location $Root
     $out = & powershell -NoProfile -File (Join-Path $Root "scripts\smoke-desktop-ui.ps1") 2>&1
     $code = $LASTEXITCODE
@@ -184,6 +188,25 @@ if (-not $SkipUI) {
 } else {
   Write-Host ""
   Write-Host "=== 8/8 桌面真机 UI 冒烟（已按 -SkipUI 跳过）===" -ForegroundColor DarkGray
+}
+
+# ---------- 9. 悬浮球面板版面守门 ----------
+# 这一层验的是**面板自己渲染出来的版面**。前 8 步全部碰不到面板的 HTML/CSS：
+# Rust 单测在数据层、桥接冒烟在文件层、真机冒烟在主程序窗口层。
+# 0.7.0 的「收起」缺陷（窗口 64px 装不下 ~100px 的内容 → 按钮行被裁到窗口外，
+# 而"展开"按钮就在那一行里 → 用户既点不到也出不来）正是这样逃过全部 8 步的。
+# 环境不可用（未装 Edge / CDP 起不来）时 exit 2 → 记 SKIP，**不冒充通过**。
+Step "9/9 悬浮球面板版面守门（无头 Edge + CDP）" {
+  Push-Location $Root
+  $out = & powershell -NoProfile -File (Join-Path $Root "scripts\smoke-ball-panel.ps1") 2>&1
+  $code = $LASTEXITCODE
+  Pop-Location
+  $out | Select-Object -Last 4 | ForEach-Object { Write-Host "    $_" }
+  if ($code -eq 2) {
+    @{ ok = $true; note = "SKIP：环境不可用（未找到 Edge 或 CDP 起不来）" }
+  } else {
+    @{ ok = ($code -eq 0); note = "exit=$code" }
+  }
 }
 
 # ---------- 汇总 ----------

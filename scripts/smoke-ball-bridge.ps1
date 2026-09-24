@@ -54,21 +54,21 @@ Start-Sleep -Seconds 5
 Assert "进程启动存活" (-not $proc.HasExited) "进程已退出"
 
 # ---- show ----
-Write-Host "`n[1/4] 测试 show" -ForegroundColor Cyan
+Write-Host "`n[1/6] 测试 show" -ForegroundColor Cyan
 Send-Ctrl "show" $null
 Start-Sleep -Seconds 3
 $t1 = Get-Content $log -Encoding UTF8 -Raw -ErrorAction SilentlyContinue
 Assert "球收到 show 命令" ($t1 -match "收到春晓命令: show") "日志中未见 show 回显"
 
 # ---- prefill ----
-Write-Host "`n[2/4] 测试 prefill（预填文本）" -ForegroundColor Cyan
+Write-Host "`n[2/6] 测试 prefill（预填文本）" -ForegroundColor Cyan
 Send-Ctrl "prefill" @{ text = "春晓桥接冒烟测试文本" }
 Start-Sleep -Seconds 3
 $t2 = Get-Content $log -Encoding UTF8 -Raw -ErrorAction SilentlyContinue
 Assert "球收到 prefill 命令" ($t2 -match "收到春晓命令: prefill") "日志中未见 prefill 回显"
 
 # ---- AI 配置同步（BYOK 配套）----
-Write-Host "`n[3/4] 测试 AI 配置随命令同步（BYOK）" -ForegroundColor Cyan
+Write-Host "`n[3/6] 测试 AI 配置随命令同步（BYOK）" -ForegroundColor Cyan
 $plainKey = "sk-chunxiao-sync-test-0001"
 Send-Ctrl "show" @{ ai = @{ baseURL = "https://api.deepseek.com"; apiKey = $plainKey; model = "deepseek-chat" } }
 Start-Sleep -Seconds 3
@@ -83,10 +83,45 @@ if (Test-Path $cfgFile) {
   Assert "落盘不含明文 Key" (-not ($cfgRaw -match [regex]::Escape($plainKey))) "配置文件里出现了明文 Key！"
   Assert "baseURL 已同步" ($cfgRaw -match "api\.deepseek\.com") "配置里未同步 baseURL"
   Assert "model 已同步" ($cfgRaw -match "deepseek-chat") "配置里未同步 model"
+  # R5：面板尺寸必须是配置里的**显式字段** —— 球靠它记住用户调过的尺寸。
+  # 缺了它，面板每次启动都回到默认 420x620，"可缩放"就成了假的。
+  Assert "R5 面板宽度键存在" ($cfgRaw -match '"panelWidth"') "配置里没有 panelWidth"
+  Assert "R5 面板高度键存在" ($cfgRaw -match '"panelHeight"') "配置里没有 panelHeight"
+  # R5.1：「收起」已整块删除，配置里**不该再有** panelCollapsed；
+  #   而且高度必须 ≥ 420 —— 旧版收起时会把 64 写进去，那会让面板变成一道残疾窄条
+  #   （输入框只剩 38px、按钮行被裁在窗口外，连"展开"都点不到）。
+  Assert "R5.1 已无 panelCollapsed（收起功能已删除）" (-not ($cfgRaw -match '"panelCollapsed"')) "配置里仍有 panelCollapsed"
+  if ($cfgRaw -match '"panelHeight"\s*:\s*(\d+)') {
+    Assert "R5.1 面板高度不小于 420" ([int]$Matches[1] -ge 420) "panelHeight=$($Matches[1]) 太小，面板会显示不全"
+  } else {
+    Assert "R5.1 面板高度不小于 420" $false "读不到 panelHeight 数值"
+  }
 }
 
+# ---- R5：新增的两个回传命令（relate_result / relate_saved）----
+# 这两个 cmd 由主程序在响应球的「关联知识点」时下发。这里不驱动面板交互
+# （面板是独立 Electron 渲染层），而是验证**轮询线程能识别它们、且不会让球崩掉** ——
+# 真实存在的缺陷形态是：主程序回传了一条球不认识的 cmd，球侧分支缺失导致抛异常/卡死。
+Write-Host "`n[4/6] 测试 relate_result（关联检索回传）" -ForegroundColor Cyan
+Send-Ctrl "relate_result" @{
+  kw = "摊还分析"; courseId = 1; note = $null
+  materials = @(@{ material = "第3讲-摊还分析.txt"; page = 12; snippet = "势能法…" })
+  priors = @(@{ id = 1; topic = "摊还分析"; summary = "均摊代价分析" })
+  kps = @(@{ id = 1; name = "摊还分析" })
+}
+Start-Sleep -Seconds 3
+$t4 = Get-Content $log -Encoding UTF8 -Raw -ErrorAction SilentlyContinue
+Assert "球收到 relate_result 命令" ($t4 -match "收到春晓命令: relate_result") "日志中未见 relate_result 回显"
+
+Write-Host "`n[5/6] 测试 relate_saved（知识点入库回传）" -ForegroundColor Cyan
+Send-Ctrl "relate_saved" @{ ok = $true; count = 2; ids = @(11, 12) }
+Start-Sleep -Seconds 3
+$t5 = Get-Content $log -Encoding UTF8 -Raw -ErrorAction SilentlyContinue
+Assert "球收到 relate_saved 命令" ($t5 -match "收到春晓命令: relate_saved") "日志中未见 relate_saved 回显"
+Assert "收到两条回传后球仍存活" (-not $proc.HasExited) "球在收到新命令后退出了"
+
 # ---- quit ----
-Write-Host "`n[4/4] 测试 quit（应结束进程）" -ForegroundColor Cyan
+Write-Host "`n[6/6] 测试 quit（应结束进程）" -ForegroundColor Cyan
 Send-Ctrl "quit" $null
 Start-Sleep -Seconds 4
 $exited = $proc.HasExited

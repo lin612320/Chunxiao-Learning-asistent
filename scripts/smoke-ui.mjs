@@ -268,13 +268,25 @@ async function main() {
   const { errors, badResponses } = attachCollectors(session);
 
   try {
-    // ---------------- /home ----------------
-    console.log("[1/9] /home 首页");
-    await goto(session, "/#/home");
+    // ---------------- 入口（R6：已删掉「首页总览」，打开即落在课程页） ----------------
+    // ⚠ R6 之前这里验的是 `/#/home` 首页。用户要求「先选择课程」并**删掉首页**，
+    //   所以断言跟着改成：**根路径必须落到课程页**、旧链接 `/#/home` 不 404（重定向过去）。
+    console.log("[1/10] 入口：根路径落到「课程」（旧的 /#/home 重定向）");
+    await goto(session, "/#/");
     let t = await text(session);
-    ok("渲染出首页内容", t.length > 40, `文本长度 ${t.length}`);
+    ok("渲染出内容", t.length > 40, `文本长度 ${t.length}`);
     ok("显示「本地单机 · 数据在本机」", t.includes("本地单机"), "未找到本机数据文案");
-    ok("未被重定向到其它路由", (await session.eval("location.hash")) === "#/home");
+    ok(
+      "根路径重定向到课程页",
+      (await session.eval("location.hash")) === "#/courses",
+      `实际 ${await session.eval("location.hash")}`,
+    );
+    await goto(session, "/#/home");
+    ok(
+      "旧的 /#/home 也能落到课程页（不 404）",
+      (await session.eval("location.hash")) === "#/courses",
+      `实际 ${await session.eval("location.hash")}`,
+    );
 
     // ---------------- R2：吉祥物母版真的被加载并渲染 ----------------
     // 为什么放在这一层：**这是唯一能证明"形象真的画出来了"的地方**。
@@ -288,10 +300,9 @@ async function main() {
         if (!el) return null;
         return { src: el.currentSrc || el.src || "", complete: !!el.complete, nw: el.naturalWidth, w: el.width, h: el.height };
       };
-      return { brand: pick('.brand-mark img'), home: pick('.home-mascot') };
+      return { brand: pick('.brand-mark img'), list: pick('.course-card') };
     })()`);
     const brandImg = imgInfo && imgInfo.brand;
-    const homeImg = imgInfo && imgInfo.home;
     ok(
       "侧栏品牌位用的是吉祥物母版（而不是文字方块）",
       !!brandImg && /mascot/.test(brandImg.src),
@@ -302,21 +313,16 @@ async function main() {
       !!brandImg && brandImg.complete && brandImg.nw > 0,
       JSON.stringify(brandImg),
     );
-    ok(
-      "首页欢迎区有吉祥物且尺寸非零",
-      !!homeImg && homeImg.complete && homeImg.nw > 0 && homeImg.w > 0 && homeImg.h > 0,
-      JSON.stringify(homeImg),
-    );
 
     // ---------------- /courses ----------------
-    console.log("\n[2/9] /courses 课程列表");
+    console.log("\n[2/10] /courses 课程列表");
     await goto(session, "/#/courses");
     t = await text(session);
     ok("渲染出课程列表", t.includes("课程"), "未见课程相关文案");
     ok("含示例课程（预览数据）", t.includes("示例课程") || t.includes("课程"), "课程卡片缺失");
 
     // ---------------- /course/:id ----------------
-    console.log("\n[3/9] 课程详情（先验知识 + 材料）");
+    console.log("\n[3/10] 课程详情（先验知识 + 材料）");
     await goto(session, "/#/course/1");
     t = await text(session);
     ok("渲染出课程详情", t.length > 80, `文本长度 ${t.length}`);
@@ -352,13 +358,57 @@ async function main() {
     }
 
     // ---------------- /assistant ----------------
-    console.log("\n[4/9] /assistant 对话页");
+    console.log("\n[4/10] /assistant 对话页");
     await goto(session, "/#/assistant");
     t = await text(session);
     ok("渲染出对话页", t.length > 40, `文本长度 ${t.length}`);
-    const hasToggle = /先查课程材料|材料/.test(t);
-    ok("有「先查课程材料再回答」开关", hasToggle, "未见材料检索开关");
+    const hasToggle = /先查材料|先查课程材料|材料/.test(t);
+    ok("有「先查材料」开关", hasToggle, "未见材料检索开关");
     ok("有输入框", (await count(session, "textarea, input[type=text]")) > 0, "未找到输入框");
+
+    // ---- R7：输入区与消息区**同宽**（用户实测反馈："输入窗口要跟上面的一样宽"）----
+    // 根因：`.assistant-input textarea` 原本没给 `width` —— `<textarea>` 不给宽度时，
+    //   宽度由 `cols` 属性决定（默认 20 字符 ≈ 190px），而它外面那层 `.assistant-drop`
+    //   只是普通 block（不是 flex 子项），不会替它拉伸。于是输入框比消息区窄一大截。
+    // 断言口径：两者都是 `.assistant-page`（flex column）的子项，应当撑满同一容器宽度。
+    const w = await session.eval(`(() => {
+      const m = document.querySelector('.assistant-messages');
+      const ta = document.querySelector('.assistant-input textarea');
+      if (!m || !ta) return null;
+      return {
+        messages: Math.round(m.getBoundingClientRect().width),
+        input: Math.round(ta.getBoundingClientRect().width)
+      };
+    })()`);
+    ok(
+      "输入框与上方消息区同宽（R7 修：原来只有 cols=20 的宽度）",
+      !!(w && Math.abs(w.messages - w.input) <= 2),
+      JSON.stringify(w),
+    );
+
+    // ---- R7：AI 回复走 Markdown 渲染（旧债 T28）----
+    // 用 `?course=1` 进入：这样被选中的必定是示例会话 31，它那条回答**故意写成 Markdown**
+    // （见 `src/data/sample.ts` 里同一处注释）。断言必须能区分"真渲染"与"原样显示"：
+    //   · 真渲染 → 有 `.md-body`、真 `<h2 class="md-heading">`、真 `<ul class="md-list">`；
+    //   · 没渲染 → 那些 `#` / `**` 会原样留在气泡的 textContent 里。
+    await goto(session, "/#/assistant?course=1");
+    const md = await session.eval(`(() => {
+      const bubble = document.querySelector('.msg.assistant .msg-bubble');
+      if (!bubble) return { found: false };
+      const txt = bubble.textContent || '';
+      return {
+        found: true,
+        hasBody: !!bubble.querySelector('.md-body'),
+        heading: (bubble.querySelector('.md-heading') || {}).textContent || '',
+        listItems: bubble.querySelectorAll('.md-list li').length,
+        bold: bubble.querySelectorAll('strong').length,
+        rawMarkers: /#{1,6}\\s/.test(txt) || /\\*\\*/.test(txt)
+      };
+    })()`);
+    ok("AI 回复走 Markdown 渲染（气泡里有 .md-body）", !!(md && md.found && md.hasBody), JSON.stringify(md));
+    ok("标题渲染成真标题（不再是一堆 #）", !!(md && /一句话结论/.test(md.heading)), JSON.stringify(md));
+    ok("列表渲染成真列表", !!(md && md.listItems >= 2), JSON.stringify(md));
+    ok("气泡里不再原样出现 # 与 ** 标记", !!(md && !md.rawMarkers), JSON.stringify(md));
 
     // 紧凑模式（?float=1）—— M0 起就该正确
     await goto(session, "/#/assistant?float=1");
@@ -410,7 +460,7 @@ async function main() {
     );
 
     // ---------------- /settings ----------------
-    console.log("\n[5/9] /settings 数据设置（BYOK）");
+    console.log("\n[5/10] /settings 数据设置（BYOK）");
     await goto(session, "/#/settings");
     t = await text(session);
     ok("渲染出设置页", t.length > 40, `文本长度 ${t.length}`);
@@ -442,7 +492,7 @@ async function main() {
     // localStorage、字段名/命令名……）。它们应当被收进可折叠的「说明」区 ——
     // 折叠状态下 `innerText` 取不到，所以这条扫描同时也在守护"默认收起"。
     // ⚠ 这条是"漏改一处就红"的守门断言：加文案时别把实现细节写回主界面。
-    console.log("\n[6/9] 全站占位措辞扫描（不得有任何板块仍是占位页）");
+    console.log("\n[6/10] 全站占位措辞扫描（不得有任何板块仍是占位页）");
     const ENGINEERING_LEAK =
       /拉普拉斯平滑|evidence\s*=\s*attempts|mastery\s*=\s*\(correct|localStorage|本机数据库|by_day|durationMs|profile_overview|focus_stats|严格\s*JSON/;
     for (const path of [
@@ -468,7 +518,7 @@ async function main() {
     }
 
     // ---------------- 诚实红线边界用例 ----------------
-    console.log("\n[7/9] 边界用例（诚实红线：未配 Key 时不得假装有 AI）");
+    console.log("\n[7/10] 边界用例（诚实红线：未配 Key 时不得假装有 AI）");
 
     await goto(session, "/#/course/1");
     const priorBefore = await count(session, '[class*="prior"]');
@@ -530,7 +580,7 @@ async function main() {
     }
 
     // ---------------- 新功能板块：笔记 / 番茄钟 ----------------
-    console.log("\n[8/9] 新功能板块：笔记 / 番茄钟 / 题库 / 画像");
+    console.log("\n[8/10] 新功能板块：笔记 / 番茄钟 / 题库 / 画像");
     // ⚠ 断言必须能**区分"真实页面"与"占位页"**：占位页同样会出现板块名、"创建"等词，
     //   早先版本就因此出现过"假通过"。这里额外断言**不出现占位措辞**，
     //   并要求真实控件/倒计时的特征文本。
@@ -659,7 +709,7 @@ async function main() {
     //   · 必须能选到「不限定课程」——即不得静默套用"最近使用的课程"（§一 第 3 条）。
     // ⚠ 这一层正是唯一能抓到"接线缺失"的地方：Rust 单测 / 桌面冒烟 / 桥接冒烟都只验后端，
     //   而 R1 修的那个缺陷（`useChat` 从没拿到 `courseId`）恰恰只在渲染结果里露出。
-    console.log("\n[9/9] R1：对话课程归属（检索范围 / 课程上下文 / 课程页入口）");
+    console.log("\n[9/10] R1：对话课程归属（检索范围 / 课程上下文 / 课程页入口）");
     const optionTexts = async () =>
       (await session.eval(
         `[...document.querySelectorAll('.content option')].map(o => o.textContent || '').join(' | ')`,
@@ -698,6 +748,171 @@ async function main() {
       "课程页有「从本课对话提炼先验知识」入口",
       /提炼先验知识|从对话提炼/.test(rct),
       "未找到提炼入口",
+    );
+
+    // ---------------- R5：悬浮球对话记录与主窗口分开 ----------------
+    // 契约 `docs/16-悬浮球轻量化与关联知识点契约.md` §六，验**渲染出来的结果**：
+    //   · 默认只列主窗口的会话（球的记录不混进来）；
+    //   · 必须有「含悬浮球记录」开关，打开后球的会话出现且**带来源徽标**；
+    //   · 关掉后又不出现 —— 证明开关真的在起作用，而不是"碰巧出现了"。
+    console.log("\n[10/10] R5：悬浮球记录与主窗口分开（开关 + 来源徽标）");
+    await goto(session, "/#/assistant");
+    ok(
+      "对话页有会话区（chip 按钮）",
+      (await count(session, ".session-bar button.chip")) > 0,
+      "会话区没有 chip 按钮",
+    );
+    const beforeText = await text(session);
+    ok(
+      "默认不列悬浮球的会话",
+      !/悬浮球问答/.test(beforeText),
+      "默认就把球的会话列出来了 —— 没做到「与主窗口分开」",
+    );
+    ok("页面上有「含悬浮球记录」开关", /含悬浮球记录/.test(beforeText), "未找到开关");
+    const clickToggle = async (needle) =>
+      await session.eval(
+        `(() => { const b = [...document.querySelectorAll('button')].find(x => (x.textContent||'').includes(${JSON.stringify(needle)})); if (!b) return false; b.click(); return true; })()`,
+      );
+    ok("点击开关成功", (await clickToggle("含悬浮球记录")) === true, "未找到可点击的开关");
+    await new Promise((r) => setTimeout(r, 500));
+    const afterText = await text(session);
+    ok("打开后列出悬浮球的会话", /悬浮球问答/.test(afterText), "打开后仍看不到球的会话");
+    ok("球的会话带来源徽标「球」", (await count(session, ".chip-tag")) > 0, "未见 .chip-tag 徽标");
+    await clickToggle("含悬浮球记录");
+    await new Promise((r) => setTimeout(r, 500));
+    ok("关掉后球会话再次消失", !/悬浮球问答/.test(await text(session)), "关掉后仍在列表里（开关没生效）");
+
+    // ---------------- R9：课程跟随 / 笔记按天 / 一键核对 / 回车发送 ----------------
+    // 四项都是用户原话提的，逐条给**能红的断言**：
+    //   ①「在顶部切换课程后下面的每个功能对应的课程也要改」——根因是题库页/画像页各自用本地 state
+    //     持有课程、**从不读 URL 的 `?course=`**（只有笔记页与对话页读了）。所以断言必须
+    //     **换 URL 看页面文字有没有跟着换**：恒为"第一门课"就是没修好。
+    //   ②「按天整理」——必须真的分组（≥2 组）、每组有条目、日期倒序。
+    //   ③「核对添加一键核对功能」——按钮要标出待核对条数；点下去待核对必须清零、按钮消失。
+    //   ④「Enter 发送、Shift+Enter 换行」——行为对：Shift+回车**不发送**、回车**发送**。
+    console.log("\n[11/11] R9：课程跟随 · 笔记按天 · 一键核对 · 回车发送");
+
+    const toolbarCourse = async () =>
+      (await session.eval(
+        `(() => { const el = document.querySelector('.qs-toolbar-note, .pf-toolbar-note'); return el ? (el.textContent || '').trim() : ''; })()`,
+      )) || "";
+
+    await goto(session, "/#/questions?course=1");
+    const qc1 = await toolbarCourse();
+    await goto(session, "/#/questions?course=2");
+    const qc2 = await toolbarCourse();
+    ok(
+      "题库页跟随 URL 课程（换课会跟着换）",
+      !!qc1 && !!qc2 && qc1 !== qc2,
+      `course=1 → ${qc1} / course=2 → ${qc2}`,
+    );
+    await goto(session, "/#/profile?course=1");
+    const pc1 = await toolbarCourse();
+    await goto(session, "/#/profile?course=2");
+    const pc2 = await toolbarCourse();
+    ok(
+      "画像页跟随 URL 课程（换课会跟着换）",
+      !!pc1 && !!pc2 && pc1 !== pc2,
+      `course=1 → ${pc1} / course=2 → ${pc2}`,
+    );
+
+    await goto(session, "/#/notes");
+    const dayInfo = await session.eval(`(() => {
+      const days = [...document.querySelectorAll('.notes-day')];
+      return {
+        groups: days.length,
+        labels: days.map(d => ((d.querySelector('.notes-day-label') || {}).textContent || '').trim()),
+        items: days.map(d => d.querySelectorAll('.notes-item').length),
+        text: (document.querySelector('.notes-list-card') || {}).innerText || ''
+      };
+    })()`);
+    ok("笔记列表按天分组（≥2 组）", !!(dayInfo && dayInfo.groups >= 2), JSON.stringify(dayInfo && dayInfo.labels));
+    ok("每个分组里都有笔记", !!(dayInfo && dayInfo.items.length > 0 && dayInfo.items.every((n) => n >= 1)), JSON.stringify(dayInfo && dayInfo.items));
+    ok(
+      "分组按日期倒序（最近的在前）",
+      (() => {
+        const ls = ((dayInfo && dayInfo.labels) || []).filter((l) => l && l !== "未标日期");
+        return ls.length >= 2 && ls.every((l, i) => i === 0 || ls[i - 1] >= l);
+      })(),
+      JSON.stringify(dayInfo && dayInfo.labels),
+    );
+    ok(
+      "自己写的与 AI 整理的在同一份按天列表里",
+      !!(dayInfo && /自己写的/.test(dayInfo.text) && /AI 整理/.test(dayInfo.text)),
+      "两种来源没有同时出现在列表里",
+    );
+
+    // ③ 一键核对：预览模式下直接改 localStorage 示例库；把 confirm 顶成自动同意
+    await goto(session, "/#/course/1");
+    const verifyBtn = await session.eval(
+      `(() => { const b = [...document.querySelectorAll('button')].find(x => /一键核对/.test(x.textContent || '')); return b ? { found: true, text: (b.textContent || '').trim() } : { found: false }; })()`,
+    );
+    ok(
+      "课程页有「一键核对」并标出待核对条数",
+      !!(verifyBtn.found && /一键核对（\d+ 条）/.test(verifyBtn.text)),
+      JSON.stringify(verifyBtn),
+    );
+    const verifyRun = await session.eval(`(async () => {
+      window.confirm = () => true;
+      const unverified = () => document.querySelectorAll('.prior-item.unverified').length;
+      const before = unverified();
+      const b = [...document.querySelectorAll('button')].find(x => /一键核对/.test(x.textContent || ''));
+      if (!b) return { ok: false, why: '没找到「一键核对」按钮' };
+      b.click();
+      await new Promise(r => setTimeout(r, 700));
+      return {
+        ok: true,
+        before,
+        after: unverified(),
+        stillThere: [...document.querySelectorAll('button')].some(x => /一键核对/.test(x.textContent || ''))
+      };
+    })()`);
+    ok(
+      "一键核对把待核对条目清零",
+      !!(verifyRun.ok && verifyRun.before > 0 && verifyRun.after === 0),
+      JSON.stringify(verifyRun),
+    );
+    ok(
+      "核对完按钮消失（没有待核对就不摆灰按钮）",
+      !!(verifyRun.ok && verifyRun.stillThere === false),
+      JSON.stringify(verifyRun),
+    );
+
+    // ④ 回车发送 / Shift+回车换行（**行为断言**，不是"有没有绑定"）
+    await goto(session, "/#/assistant");
+    const enterBehavior = await session.eval(`(async () => {
+      const ta = document.querySelector('.assistant-input textarea');
+      if (!ta) return { ok: false, why: '没找到输入框' };
+      const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      const type = async (v) => {
+        set.call(ta, v);
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 80));
+      };
+      const pressEnter = (shift) => ta.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter', shiftKey: shift, bubbles: true, cancelable: true
+      }));
+      const bubbles = () => document.querySelectorAll('.msg.user').length;
+
+      const before = bubbles();
+      await type('回车行为断言');
+      pressEnter(true);                       // Shift+回车 → 只换行，不发送
+      await new Promise(r => setTimeout(r, 400));
+      const afterShift = bubbles();
+      const textKept = (ta.value || '').length > 0;
+      pressEnter(false);                      // 回车 → 发送
+      await new Promise(r => setTimeout(r, 1000));
+      return { ok: true, before, afterShift, afterEnter: bubbles(), textKept };
+    })()`);
+    ok(
+      "Shift+回车不发送（内容还留在输入框里）",
+      !!(enterBehavior.ok && enterBehavior.afterShift === enterBehavior.before && enterBehavior.textKept),
+      JSON.stringify(enterBehavior),
+    );
+    ok(
+      "回车发送（消息真的发出去了）",
+      !!(enterBehavior.ok && enterBehavior.afterEnter > enterBehavior.before),
+      JSON.stringify(enterBehavior),
     );
 
     // ---------------- 资源与 console 总检查 ----------------

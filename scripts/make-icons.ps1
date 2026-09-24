@@ -79,19 +79,21 @@ try {
   $inner = $m.Groups[1].Value.Trim()
   Write-Host ("母版：{0}  →  内部内容 {1:N0} 字符（含 <defs> 渐变/滤镜 id）" -f (Split-Path $Mascot -Leaf), $inner.Length)
 
-  # ---- 2. 合成 SVG：圆角底盘 + 晨光 + 玻璃质感 + 母版内容 ----
-  #   母版是**透明底角色**，直接当图标会糊在任务栏上；先合成到品牌绿圆角底盘上。
+  # ---- 2. 合成 SVG：圆角底盘 + 顶光 + 玻璃质感 + 母版内容（R10：盘色/光色换成 DSH 令牌）----
+  #   母版是**透明底角色**，直接当图标会糊在任务栏上；先合成到圆角底盘上。
+#   R10：底盘用 DSH 的近黑（layer-2 #2C2C2E → brand-primary #0F1115），
+#   顶光用 DSH 品牌蓝 #5686FE —— 于是**蓝色鲸鱼在近黑盘上**，与主题同源。
   #   取景：视觉中心 (120,120) 对齐底盘中心 (256,256)，scale(2) → 内容约占底盘 70%，四边留白均匀。
   $composite = @"
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#45BE8C"/>
-      <stop offset="1" stop-color="#1E6A4E"/>
+      <stop offset="0" stop-color="#2C2C2E"/>
+      <stop offset="1" stop-color="#0F1115"/>
     </linearGradient>
     <radialGradient id="dawn" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#FFF0CE" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#FFF0CE" stop-opacity="0"/>
+      <stop offset="0" stop-color="#5686FE" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#5686FE" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
@@ -100,7 +102,7 @@ try {
   </defs>
   <!-- 圆角底盘 -->
   <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#tile)"/>
-  <!-- 顶部晨光：给底盘一点"日出"的方向感 -->
+  <!-- 顶部顶光：DSH 品牌蓝的一抹，给底盘一点方向感 -->
   <ellipse cx="256" cy="150" rx="228" ry="130" fill="url(#dawn)"/>
   <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#glass)"/>
   <!-- 玻璃质感内描边（"高级"的关键：一圈极细的高光边） -->
