@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCourses } from "../hooks/useCourses";
+import { COURSE_PARAM, rememberLastCourseId } from "../lib/courseScope";
 import Icon from "../components/Icon";
 
 type Filter = "active" | "archived" | "all";
@@ -31,7 +32,13 @@ export default function Courses() {
     if (id !== null) {
       setForm({ name: "", term: "", teacher: "", intro: "" });
       setShowForm(false);
-      nav(`/course/${id}`);
+      // R12：新建的课**立刻成为当前课程**。
+      // 原来只跳 `/course/${id}`（不带课程参数、也不记 last-course），于是侧栏选择器
+      // 仍停在「全部课程」或上一门课，顶栏的当前课程胶囊也不出现 —— 用户看到的就是
+      // 「刚建的课没被选上」。这里与侧栏切换课程走**同一套口径**（URL 的 `?course=`
+      // 为唯一事实来源 + `localStorage` 记住），不另造状态。
+      rememberLastCourseId(id);
+      nav(`/course/${id}?${COURSE_PARAM}=${id}`);
     }
   }
 
