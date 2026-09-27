@@ -13,6 +13,7 @@ import Notes from "./views/Notes";
 import Questions from "./views/Questions";
 import Profile from "./views/Profile";
 import NoteEditor from "./views/NoteEditor";
+import Materials from "./views/Materials";
 
 /**
  * 路由表（R6：改成**课程优先**）。
@@ -42,6 +43,8 @@ export default function App() {
           {/* R12：笔记的**沉浸式编辑器**（独立文档视图）。`Layout` 见到 `/note/` 前缀会
               换成无干扰外壳（不渲染侧栏与顶栏），返回入口在编辑器自己的顶栏里。 */}
           <Route path="/note/:id" element={<NoteEditor />} />
+          {/* R13：侧栏「相关材料」——列本课导入的材料，点「打开」用系统默认程序打开原文件 */}
+          <Route path="/materials" element={<Materials />} />
           <Route path="/focus" element={<Focus />} />
 
           {/* M4 已落地：题库与学习画像（不再是占位页） */}

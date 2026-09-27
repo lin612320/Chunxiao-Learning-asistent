@@ -412,6 +412,77 @@ async function main() {
       }
     }
 
+    // ---------------- R13：相关材料（真机 + 真 IPC）----------------
+    // 浏览器层只能验到"点打开会如实报错（仅桌面版可用）"；这一层验的是**真 IPC 真的注册了**、
+    // 参数名真的对得上、以及新命令的**拒绝路径**真的会拒绝。
+    //
+    // ⚠ 这里**刻意不调用会写盘的正常路径**：`material_store_file` 成功时会往
+    //   `%APPDATA%\com.chunxiao.study\materials\` 落文件，而 .ps1 只隔离了数据库文件，
+    //   素材目录是共享的 —— 测试不该往用户的素材目录里塞东西。
+    //   "真的写盘 + 指纹命名 + 同内容复用"由 Rust 单测
+    //   `store_material_bytes_names_fingerprints_and_reuses` 在临时目录里覆盖。
+    console.log("\n[R13] 相关材料：新命令在真桌面下已注册且拒绝路径正确");
+
+    // ⚠ 这一段**必须挂在隔离自检通过之后**：下面那条「空库时如实说还没有材料」
+    //   只有在隔离出来的空库上才成立；否则拿真实库跑必红（用户库里本来就有材料）。
+    //   断言依赖"空库"这个前提，就得待在为它准备的分支里 —— 这正是前面那条教训。
+    if (isolated) {
+
+    const navR13 = await session.eval(
+      `(() => [...document.querySelectorAll('.nav-item .nav-label')].map(n => (n.textContent || '').trim()))()`,
+    );
+    ok(
+      "真机侧栏有「相关材料」入口",
+      Array.isArray(navR13) && navR13.includes("相关材料"),
+      JSON.stringify(navR13),
+    );
+
+    await gotoHash(session, "#/materials", /相关材料/);
+    // ⚠ 轮询等 `.materials-page` 真的挂上再断言：侧栏本来就含「相关材料」四个字，
+    //   拿它当等待条件会**在页面还没渲染时立刻通过**，断言就变成随机红/绿。
+    const matPage = await session.eval(`(async () => {
+      for (let i = 0; i < 20; i++) {
+        if (document.querySelector('.materials-page')) break;
+        await new Promise(r => setTimeout(r, 200));
+      }
+      return {
+        page: !!document.querySelector('.materials-page'),
+        items: document.querySelectorAll('.material-item').length,
+        empty: /还没有材料/.test(document.body.innerText || ''),
+      };
+    })()`);
+    ok("真机下材料页能打开（走真 SQLite）", matPage.page === true, JSON.stringify(matPage));
+    ok(
+      "空库时如实说「还没有材料」（不摆假数据）",
+      matPage.empty === true && matPage.items === 0,
+      JSON.stringify(matPage),
+    );
+
+    const r13 = await session.eval(`(async () => {
+      const inv = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+      if (!inv) return { ok: false, why: '拿不到 __TAURI_INTERNALS__.invoke' };
+      const call = async (cmd, args) => {
+        try { return { ok: true, v: await inv(cmd, args) }; }
+        catch (e) { return { ok: false, e: String(e && e.message ? e.message : e) }; }
+      };
+      // 只打**拒绝路径**（不会写盘、不改库）
+      const badB64 = await call('material_store_file', { fileName: '冒烟.txt', dataB64: 'not-base64!!' });
+      const badId = await call('material_set_path', { id: 999999, filePath: 'X:/nope' });
+      return { ok: true, badB64, badId };
+    })()`);
+    ok(
+      "material_store_file 已注册：非法 base64 被如实拒绝",
+      !!(r13.ok && r13.badB64 && r13.badB64.ok === false && /base64/.test(r13.badB64.e || '')),
+      JSON.stringify(r13.badB64),
+    );
+    ok(
+      "material_set_path 已注册：不存在的材料报错（不静默成功）",
+      !!(r13.ok && r13.badId && r13.badId.ok === false),
+      JSON.stringify(r13.badId),
+    );
+
+    }  // end if (isolated)：R13
+
     // ---------------- 诚实红线 ----------------
     console.log("\n[边界] 真桌面下不得有 console 报错");
     const real = consoleErrors.filter((e) => !/favicon|DevTools|Download the React/i.test(e));

@@ -466,6 +466,24 @@ function seed(): SampleDB {
         note: "模型解析，非原文：内容由视觉模型转录，可能有误，请对照原图核对。",
         created_at: iso(2),
       },
+      {
+        // R13 示例：**没有原文件位置**的材料（早期按字节导入，库里只剩正文）。
+        // 用来覆盖「相关材料」页的诚实分支：这种材料不摆点了没反应的「打开」，
+        // 而是明说原因 + 给「补存原文件」入口。样例数据里必须有这么一条，
+        // 否则那个分支在浏览器层冒烟里永远走不到。
+        id: 24,
+        course_id: 1,
+        file_name: "机房上机指导.txt",
+        file_path: "",
+        kind: "txt",
+        size_bytes: 3072,
+        extracted_by: "local",
+        text_len: 1180,
+        chunk_count: 2,
+        truncated: 0,
+        note: null,
+        created_at: iso(6),
+      },
     ],
     sessions: [
       {

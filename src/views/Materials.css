@@ -1,0 +1,48 @@
+/* ==========================================================================
+   R13 · 「相关材料」页（`views/Materials.tsx`）
+
+   材料条目本身的排版**复用全局 `styles.css` 的 `.material-*`**（与课程总览的「材料」
+   是同一套：`.material-list / .material-item / .material-head / .material-name /
+   .material-actions / .material-note-warn / .material-meta`）——
+   同一个东西在两页长得不一样，用户会以为是两种材料。
+   本文件只补这一页自己的骨架：页头说明、按课程分组、打开按钮的图标对齐。
+   ========================================================================== */
+
+.materials-head-note {
+  font-size: var(--fs-sm);
+  max-width: 820px;
+  line-height: 1.6;
+}
+
+/* 按课程分组（只在「全部课程」模式下出现分组头） */
+.materials-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.materials-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.materials-group-head .muted {
+  font-weight: 400;
+  font-size: var(--fs-xs);
+}
+
+/* 「打开」是主动作，图标与文字基线对齐 */
+.mat-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.materials-hint {
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}

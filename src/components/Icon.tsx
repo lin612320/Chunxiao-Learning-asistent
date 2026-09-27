@@ -56,7 +56,10 @@ export type IconName =
   | "image"
   | "sigma"
   | "table"
-  | "divider";
+  | "divider"
+  // R13：材料
+  | "folder"
+  | "external";
 
 const PATHS: Record<IconName, ReactNode> = {
   home: (
@@ -285,6 +288,20 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   divider: <path d="M3.6 12h16.8M6.6 8.4h10.8M6.6 15.6h10.8" />,
+
+  // ---- R13：材料 ----
+  folder: (
+    <>
+      <path d="M3.6 7.2a2 2 0 0 1 2-2h3.4l2 2.4h7.4a2 2 0 0 1 2 2v7.2a2 2 0 0 1-2 2H5.6a2 2 0 0 1-2-2z" />
+    </>
+  ),
+  external: (
+    <>
+      <path d="M14 4.6h5.4V10" />
+      <path d="M19.4 4.6 12 12" />
+      <path d="M18 14.6v3.8a1.6 1.6 0 0 1-1.6 1.6H5.6A1.6 1.6 0 0 1 4 18.4V7.6A1.6 1.6 0 0 1 5.6 6h3.8" />
+    </>
+  ),
 };
 
 export interface IconProps {

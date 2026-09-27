@@ -1106,6 +1106,80 @@ async function main() {
       !!(saveAttempt.ok && /桌面版/.test(saveAttempt.text)),
       JSON.stringify(saveAttempt));
 
+    // ---------------- R13：侧栏「相关材料」+ 点材料直接打开 ----------------
+    //
+    // 用户原话：「在侧栏添加一个相关材料，点击材料可以直接跳转窗口（比如 pdf 点开就打开 pdf）」。
+    //
+    // 这一段的重点是**两条分支都要覆盖到**：
+    //   ① 有原文件位置的材料 → 摆「打开」按钮；
+    //   ② 没有原文件位置的材料（`file_path` 为空，早期按字节导入的）→ **不摆点了没反应的
+    //      「打开」**，而是明说原因 + 给「补存原文件」入口。
+    // 样例数据里两条都准备了（`data/sample.ts` 的 id=21/22 有路径，id=24 没有）。
+    // 另外：浏览器预览下点「打开」**必须如实报错**（这是仅桌面版可用的动作），
+    // 断言的就是"如实说做不到"，不是"假装打开成功"。
+    console.log("\n[13/13] R13：侧栏「相关材料」· 打开原文件 · 诚实分支");
+
+    await goto(session, "/#/courses");
+    const navHas = await session.eval(
+      `(() => { const items = [...document.querySelectorAll('.nav-item .nav-label')]; return items.map(n => (n.textContent || '').trim()); })()`,
+    );
+    ok("侧栏有「相关材料」入口", Array.isArray(navHas) && navHas.includes("相关材料"), JSON.stringify(navHas));
+
+    const entered = await session.eval(`(async () => {
+      const el = [...document.querySelectorAll('.nav-item')].find(a => /相关材料/.test(a.textContent || ''));
+      if (!el) return { ok: false, why: '没找到入口' };
+      el.click();
+      await new Promise(r => setTimeout(r, 900));
+      return {
+        ok: true,
+        hash: location.hash,
+        page: !!document.querySelector('.materials-page'),
+        groups: document.querySelectorAll('.materials-group').length,
+      };
+    })()`);
+    ok("点侧栏入口进入相关材料页", !!(entered.ok && /^#\/materials/.test(entered.hash) && entered.page), JSON.stringify(entered));
+
+    // ⚠ 上一步的落点取决于"当时有没有选中课程"（R12 段落刚建过一门课并选中了它，
+    //    于是会落到 `?course=<新课>`）。所以"分组"这条**自己显式导航到不带课程参数的模式**，
+    //    不去依赖上一步残留的状态 —— 断言依赖别人留下的状态，就会变成随机红。
+    await goto(session, "/#/materials");
+    const allCourses = await session.eval(`(() => ({
+      groups: document.querySelectorAll('.materials-group').length,
+      heads: [...document.querySelectorAll('.materials-group-head')].map(h => (h.textContent || '').trim()),
+    }))()`);
+    ok("不带课程参数时按课程分组（≥2 组）", allCourses.groups >= 2, JSON.stringify(allCourses));
+
+    // 锁定某门课：只列这门课的材料
+    await goto(session, "/#/materials?course=1");
+    const locked = await session.eval(`(() => {
+      const names = [...document.querySelectorAll('.materials-page .material-name')].map(n => (n.textContent || '').trim());
+      return {
+        names,
+        groups: document.querySelectorAll('.materials-group').length,
+        hasOtherCourse: names.some(n => /线代|板书/.test(n)),
+        openBtns: document.querySelectorAll('.materials-page .mat-open-btn').length,
+        repick: [...document.querySelectorAll('.materials-page button')].some(b => /补存原文件/.test(b.textContent || '')),
+        honest: /只导入过内容，没有原文件位置/.test(document.body.innerText || ''),
+      };
+    })()`);
+    ok("锁定课程后只列该课材料（不串课）", locked.names.length > 0 && !locked.hasOtherCourse, JSON.stringify(locked.names));
+    ok("有原文件位置的材料摆「打开」按钮", locked.openBtns >= 1, "openBtns=" + locked.openBtns);
+    ok("没有原文件位置的材料给「补存原文件」而不是「打开」", locked.repick === true, JSON.stringify(locked));
+    ok("没有原文件位置时如实写明原因", locked.honest === true, "未出现「只导入过内容，没有原文件位置」");
+
+    // 点「打开」：预览模式下必须如实报错
+    const openClick = await session.eval(`(async () => {
+      const b = document.querySelector('.materials-page .mat-open-btn');
+      if (!b) return { ok: false, why: '没有「打开」按钮' };
+      b.click();
+      await new Promise(r => setTimeout(r, 700));
+      const err = document.querySelector('.settings-msg.err');
+      return { ok: true, text: err ? (err.textContent || '').trim() : '' };
+    })()`);
+    ok("预览模式下点「打开」如实报错（不假装打开成功）",
+      !!(openClick.ok && /桌面版/.test(openClick.text)),
+      JSON.stringify(openClick));
+
     // ---------------- 资源与 console 总检查 ----------------
     console.log("\n[汇总检查] 资源与 console 报错");
     const uniqBad = [...new Set(badResponses)];

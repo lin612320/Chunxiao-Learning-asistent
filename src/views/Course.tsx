@@ -12,9 +12,11 @@ import {
 } from "../data/sample";
 import {
   extractMaterialB64,
+  fmtSize,
   needsVisionModel,
   noteForUser,
   readFileAsB64,
+  storeMaterialFile,
   IMPORT_ACCEPT,
   MAX_IMPORT_BYTES,
 } from "../lib/materials";
@@ -251,11 +253,20 @@ export default function Course() {
     },
   ): Promise<void> {
     if (isTauri()) {
-      // file_path 传空字符串：字节导入没有真实路径（M1 契约 §4.1）
+      // R13：**先把原始文件在本机留一份副本**，再入库。
+      // 材料的正文是按**字节**提取的（浏览器只给得到字节、给不到绝对路径），
+      // 不留副本的话 `file_path` 只能是空字符串 —— 于是「点材料打开原文件」根本无从谈起。
+      // 存副本失败**不牵连整条导入**：退回空路径，界面上会如实写「只导入过内容，没有原文件位置」。
+      let storedPath = "";
+      try {
+        storedPath = await storeMaterialFile(f.name, await readFileAsB64(f));
+      } catch (e) {
+        console.warn("[material] 留副本失败，按「没有原文件位置」导入：", e);
+      }
       await invokeStrict<number>("material_add", {
         courseId,
         fileName: f.name,
-        filePath: "",
+        filePath: storedPath,
         kind: info.kind,
         sizeBytes: f.size,
         extractedBy: info.extractedBy,
@@ -965,9 +976,3 @@ function sourceInfo(p: PriorItem): { text: string; cls: string; needsCheck: bool
   };
 }
 
-function fmtSize(bytes?: number | null): string {
-  if (!bytes || bytes <= 0) return "大小未知";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}

@@ -1077,6 +1077,21 @@ pub fn material_delete(conn: &Connection, id: i64) -> Result<(), String> {
     ensure_affected(n, "材料", id)
 }
 
+/// R13：记下材料在本机的**真实文件路径**（导入时留了一份原始文件副本），
+/// 之后「打开材料」才有东西可交给系统默认程序。
+///
+/// 只动 `file_path` 一列 —— **绝不碰正文、切块与来源标注**：
+/// 补存原文件是"给它补个位置"，不是"重新导入"，把已提取的内容改掉是两回事。
+pub fn material_set_path(conn: &Connection, id: i64, file_path: &str) -> Result<(), String> {
+    let n = conn
+        .execute(
+            "UPDATE materials SET file_path = ?1 WHERE id = ?2",
+            rusqlite::params![file_path, id],
+        )
+        .map_err(friendly)?;
+    ensure_affected(n, "材料", id)
+}
+
 /// 某课程全部材料正文（按材料 + 块序拼接，带材料标题，供喂给模型时溯源）
 pub fn material_text_all(conn: &Connection, course_id: i64) -> Result<String, String> {
     let mut stmt = conn
@@ -4260,6 +4275,49 @@ mod tests {
         assert!(all.contains("进程与线程"));
         assert!(all.contains("死锁的四个必要条件"));
         assert!(all.contains("（本地提取）"));
+    }
+
+    /// R13：`material_set_path` 只动 `file_path` 一列 ——
+    /// 正文、切块与来源标注**都不许被碰**（补存原文件是"补个位置"，不是"重新导入"）。
+    #[test]
+    fn material_set_path_only_touches_file_path() {
+        let conn = mem();
+        let cid = course_create(&conn, "编译原理", None, None, None).unwrap();
+        let mid = material_add(
+            &conn,
+            cid,
+            "课件.pdf",
+            "",
+            "pdf",
+            Some(1024),
+            "model",
+            "词法分析把字符流切成记号流。",
+            Some(1),
+            None,
+            Some("模型解析，非原文"),
+        )
+        .unwrap();
+
+        let text_before = material_text_all(&conn, cid).unwrap();
+        material_set_path(&conn, mid, "C:\\素材\\课件__ab12cd34.pdf").unwrap();
+
+        let (path, by): (String, String) = conn
+            .query_row(
+                "SELECT file_path, extracted_by FROM materials WHERE id = ?1",
+                [mid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(path, "C:\\素材\\课件__ab12cd34.pdf");
+        assert_eq!(by, "model", "来源标注不许被改");
+        assert_eq!(
+            material_text_all(&conn, cid).unwrap(),
+            text_before,
+            "补路径不许改动正文与切块"
+        );
+
+        // 不存在的 id → 可读错误，**不静默成功**
+        assert!(material_set_path(&conn, 99999, "x").is_err());
     }
 
     // ---------------- M1：材料检索 ----------------

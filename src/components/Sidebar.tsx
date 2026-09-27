@@ -128,6 +128,8 @@ export default function Sidebar() {
           <>
             {item(`/course/${active.id}`, "book", "课程总览", true)}
             {item(withCourse("/notes"), "note", "笔记")}
+            {/* R13：用户要求「在侧栏添加一个相关材料，点击材料可以直接打开」 */}
+            {item(withCourse("/materials"), "folder", "相关材料")}
             {item(withCourse("/questions"), "help", "题库")}
             {item(withCourse("/assistant"), "chat", "与该课对话")}
             {item(withCourse("/profile"), "chart", "学习画像")}
@@ -136,6 +138,7 @@ export default function Sidebar() {
           <>
             {item("/courses", "book", "课程列表")}
             {item("/notes", "note", "全部笔记")}
+            {item("/materials", "folder", "相关材料")}
             {item("/questions", "help", "全部题库")}
             {item("/profile", "chart", "学习画像")}
           </>

@@ -19,6 +19,7 @@ const PAGES: Array<{ key: string; label: string; match: (pathname: string) => bo
   { key: "courses", label: "课程", match: (p) => p === "/courses" || p === "/" },
   { key: "course", label: "课程", match: (p) => p.startsWith("/course/") },
   { key: "notes", label: "笔记", match: (p) => p === "/notes" },
+  { key: "materials", label: "相关材料", match: (p) => p === "/materials" },
   { key: "questions", label: "题库", match: (p) => p === "/questions" },
   { key: "profile", label: "学习画像", match: (p) => p === "/profile" },
   { key: "assistant", label: "与春晓对话", match: (p) => p === "/assistant" },

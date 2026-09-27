@@ -301,6 +301,14 @@ fn material_delete(conn: State<'_, DbState>, id: i64) -> Result<(), String> {
     db::material_delete(&c, id)
 }
 
+/// R13：给**已有**材料补记真实文件路径（老材料的 `file_path` 是空字符串）。
+/// 前端流程：用户重新选一次原文件 → `material_store_file` 落一份副本 → 本命令把路径记下。
+#[tauri::command]
+fn material_set_path(conn: State<'_, DbState>, id: i64, file_path: String) -> Result<(), String> {
+    let c = conn_of(&conn)?;
+    db::material_set_path(&c, id, &file_path)
+}
+
 /// 某课程全部材料正文（按材料 + 块序拼接），供前端喂给模型。
 /// 没有材料时返回**空字符串**（不是 null）。
 #[tauri::command]
@@ -370,15 +378,14 @@ fn strip_data_url(s: &str) -> &str {
     t
 }
 
-/// 从**字节**导入材料：前端 `<input type="file">` 只拿得到字节、拿不到绝对路径。
-/// 流程：base64 解码（容忍 data: 前缀）→ 大小上限 20 MB → 写临时文件（**保留原扩展名**，
-/// 因为 `office::extract_office_text` 按扩展名分派）→ 提取 → **无论成功失败都删除临时文件**。
-/// 返回形状与 `extract_material` 完全一致。
-#[tauri::command]
-fn extract_material_b64(file_name: String, data_b64: String) -> Result<Value, String> {
+/// 校验并解码导入字节（空 / 超长 / 非法 base64 → 与既有文案**逐字一致**）。
+///
+/// R13 抽出来，是为了让 `extract_material_b64` 与 `material_store_file` 共用同一套校验：
+/// 两处各写一遍迟早会漂移（一处改了上限、另一处没改，就成了"提取能过、存副本被拒"这种怪事）。
+fn decode_import_bytes(data_b64: &str) -> Result<Vec<u8>, String> {
     use base64::Engine as _;
 
-    let payload = strip_data_url(&data_b64);
+    let payload = strip_data_url(data_b64);
     // 去掉换行等空白：base64 引擎只认字母表，带换行的输入不该被拒
     let cleaned: String = payload
         .chars()
@@ -400,8 +407,11 @@ fn extract_material_b64(file_name: String, data_b64: String) -> Result<Value, St
     if bytes.len() > MAX_IMPORT_BYTES {
         return Err(too_big_msg(bytes.len()));
     }
+    Ok(bytes)
+}
 
-    // 只取文件名部分并清掉 Windows 非法字符：**不让前端传来的名字变成路径**
+/// 只取文件名部分并清掉 Windows 非法字符：**不让前端传来的名字变成路径**。
+fn safe_file_name(file_name: &str) -> Result<String, String> {
     let raw_name = file_name.rsplit(['/', '\\']).next().unwrap_or("").trim();
     let safe: String = raw_name
         .chars()
@@ -411,6 +421,28 @@ fn extract_material_b64(file_name: String, data_b64: String) -> Result<Value, St
     if safe.is_empty() {
         return Err("文件名不能为空。".into());
     }
+    Ok(safe)
+}
+
+/// 内容的 8 位十六进制指纹（FNV-1a 32 位，零依赖）。
+/// 用在素材副本的文件名里：**内容相同只存一份**，内容不同也不会撞名。
+fn fingerprint8(bytes: &[u8]) -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in bytes {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    format!("{h:08x}")
+}
+
+/// 从**字节**导入材料：前端 `<input type="file">` 只拿得到字节、拿不到绝对路径。
+/// 流程：base64 解码（容忍 data: 前缀）→ 大小上限 20 MB → 写临时文件（**保留原扩展名**，
+/// 因为 `office::extract_office_text` 按扩展名分派）→ 提取 → **无论成功失败都删除临时文件**。
+/// 返回形状与 `extract_material` 完全一致。
+#[tauri::command]
+fn extract_material_b64(file_name: String, data_b64: String) -> Result<Value, String> {
+    let bytes = decode_import_bytes(&data_b64)?;
+    let safe = safe_file_name(&file_name)?;
 
     // 临时文件放在系统临时目录，名字带进程号 + 纳秒时间戳避免并发互撞，**保留原扩展名**
     let ext = std::path::Path::new(&safe)
@@ -432,6 +464,72 @@ fn extract_material_b64(file_name: String, data_b64: String) -> Result<Value, St
     let extracted = office::extract_office_text(&tmp);
     let _ = fs::remove_file(&tmp); // 成功失败都清理，不留垃圾
     Ok(extract_to_value(extracted?))
+}
+
+/// R13：把导入的原始文件**在本机留一份副本**，返回可直接交给 `open_file` 的绝对路径。
+///
+/// ## 为什么必须有这一步
+/// 材料是按**字节**导入的（前端 `<input type=file>` 只拿得到字节、拿不到绝对路径），
+/// 所以 M1 契约里 `materials.file_path` 一直是**空字符串** —— 于是「点材料打开原文件」
+/// 这件事**根本无从谈起**：`open_file` 需要一个真实存在的路径。
+/// 前端拿到本命令返回的路径后写进 `material_add` 的 `file_path`；
+/// 之后用户把原文件移走、改名甚至删掉，春晓这边**照样能打开**。
+///
+/// ## 落盘位置与命名
+/// `app_data_dir()/materials/<原名主干>__<内容指纹8位>.<原扩展名>`
+///   · 指纹让**内容相同只占一份**、内容不同不撞名（同名不同内容是常态：多个课程都叫"课件.pdf"）；
+///   · 保留原名与扩展名，用户自己翻这个目录时还认得出来。
+/// 目标文件已存在 → **直接复用**，不重复写盘。
+///
+/// ## 代价（如实登记）
+/// 材料会在本机**多占一份磁盘**（单文件上限 20 MB）。换来的是"点开就能打开"。
+/// 这是本轮明确接受的取舍，不是遗漏。
+/// 素材副本的落盘核心（**纯 IO，可单测**）：清洗文件名 → 加内容指纹 → 写入 → 返回落盘路径。
+///
+/// 从命令里切出来，是为了能在单测里用**临时目录**验证"命名 / 同内容复用 / 不覆盖"，
+/// 不必起 Tauri 运行时、更不会碰到用户 AppData 里的素材目录。
+fn store_material_bytes(
+    dir: &std::path::Path,
+    file_name: &str,
+    bytes: &[u8],
+) -> Result<std::path::PathBuf, String> {
+    let safe = safe_file_name(file_name)?;
+    fs::create_dir_all(dir).map_err(|e| format!("创建素材目录失败：{e}"))?;
+
+    // 拆主干 / 扩展名（扩展名一律小写，免得 .PDF 与 .pdf 各存一份）
+    let path = std::path::Path::new(&safe);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("material")
+        .to_string();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase());
+    let stamp = fingerprint8(bytes);
+    let out_name = match ext.as_deref() {
+        Some(e) if !e.is_empty() => format!("{stem}__{stamp}.{e}"),
+        _ => format!("{stem}__{stamp}"),
+    };
+
+    let dst = dir.join(&out_name);
+    if !dst.exists() {
+        fs::write(&dst, bytes).map_err(|e| format!("保存素材副本失败：{e}"))?;
+    }
+    Ok(dst)
+}
+
+#[tauri::command]
+fn material_store_file(app: AppHandle, file_name: String, data_b64: String) -> Result<String, String> {
+    let bytes = decode_import_bytes(&data_b64)?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("materials");
+    let dst = store_material_bytes(&dir, &file_name, &bytes)?;
+    Ok(dst.to_string_lossy().into_owned())
 }
 
 /// 在已导入材料的切块里按关键词召回，**按相关度降序**返回。
@@ -999,9 +1097,12 @@ fn profile_overview(conn: State<'_, DbState>, course_id: i64) -> Result<Value, S
 // ---------------------------------------------------------------------------
 
 /// 允许交给系统打开的扩展名白名单（不在此列的扩展名一律拒绝，避免变成任意程序启动器）
-const OK_EXT: [&str; 14] = [
-    "docx", "doc", "md", "txt", "xlsx", "xls", "pdf", "html", "htm", "csv", "png", "jpg", "jpeg",
-    "webp",
+///
+/// R13 补上 `pptx`：应用**本来就能导入** pptx（`IMPORT_ACCEPT` 与 `office.rs` 都支持），
+/// 但打开白名单里没有它 —— 结果是"导得进来、点开却说不支持"，属于口径不自洽。
+const OK_EXT: [&str; 15] = [
+    "docx", "doc", "pptx", "md", "txt", "xlsx", "xls", "pdf", "html", "htm", "csv", "png", "jpg",
+    "jpeg", "webp",
 ];
 
 fn ext_of(path: &str) -> String {
@@ -1261,6 +1362,9 @@ pub fn run() {
             material_delete,
             material_text_all,
             extract_material,
+            // R13：把导入的原始文件留一份本机副本（返回路径）→ 材料才「点开就能打开」
+            material_store_file,
+            material_set_path,
             // M1：字节导入 + 带出处检索
             extract_material_b64,
             material_search,
@@ -1341,6 +1445,61 @@ mod tests {
 
     fn b64(bytes: &[u8]) -> String {
         base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    /// R13：素材副本的三个纯函数 —— 文件名清洗、内容指纹、导入字节校验。
+    /// 这几条是 `material_store_file` 的安全与稳定性地基，单独测比只测整条命令更划算。
+    #[test]
+    fn material_store_helpers_sanitize_and_validate() {
+        // ① 文件名清洗：**不许让前端传来的名字变成路径**（`..\..\` 必须被剥掉）
+        assert_eq!(
+            safe_file_name("..\\..\\windows\\system32\\evil.exe").unwrap(),
+            "evil.exe"
+        );
+        assert_eq!(safe_file_name("a/b/c.pdf").unwrap(), "c.pdf");
+        assert_eq!(safe_file_name("报告:第一版?.pdf").unwrap(), "报告_第一版_.pdf");
+        assert!(safe_file_name("   ").is_err(), "只有空白的名字必须被拒");
+        assert!(safe_file_name("...").is_err(), "全是点的名字必须被拒");
+
+        // ② 内容指纹：同内容同值、异内容异值（同名不同内容才不会被覆盖）
+        assert_eq!(fingerprint8(b"abc"), fingerprint8(b"abc"));
+        assert_ne!(fingerprint8(b"abc"), fingerprint8(b"abd"));
+        assert_eq!(fingerprint8(b"abc").len(), 8);
+
+        // ③ 导入字节校验：空 / 非法 base64 → 可读错误；合法 → 原样解出
+        assert!(decode_import_bytes("").is_err());
+        assert!(decode_import_bytes("不是 base64!!").is_err());
+        assert_eq!(decode_import_bytes(&b64(b"hello")).unwrap(), b"hello");
+        // 容忍 FileReader 带上的 data: 前缀（前缀本身不该被当成内容）
+        let prefixed = format!("data:text/plain;base64,{}", b64(b"hi"));
+        assert_eq!(decode_import_bytes(&prefixed).unwrap(), b"hi");
+    }
+
+    /// R13：素材副本真的写盘 —— 命名带指纹、**同内容复用同一份、同名不同内容不覆盖**。
+    /// 用临时目录跑，所以既不碰用户 AppData 里的素材目录，也不需要起 Tauri。
+    #[test]
+    fn store_material_bytes_names_fingerprints_and_reuses() {
+        let dir = std::env::temp_dir().join(format!("chunxiao-store-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let p1 = store_material_bytes(&dir, "讲义.PDF", b"same").unwrap();
+        let name = p1.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("讲义__"), "要保住原名主干：{name}");
+        assert!(name.ends_with(".pdf"), "扩展名要归一化成小写：{name}");
+        assert!(name.contains("__") && name.len() > "讲义__.pdf".len(), "要带内容指纹：{name}");
+        assert!(p1.exists(), "副本必须真的落盘");
+
+        // 同内容再存一次 → 复用同一路径（不重复写盘）
+        let p2 = store_material_bytes(&dir, "讲义.PDF", b"same").unwrap();
+        assert_eq!(p1, p2, "同内容必须复用同一份");
+
+        // 同名不同内容 → 另存一份，**原有副本不许被覆盖**
+        let p3 = store_material_bytes(&dir, "讲义.PDF", b"other").unwrap();
+        assert_ne!(p1, p3, "同名不同内容不能撞在一条路径上");
+        assert_eq!(fs::read(&p1).unwrap(), b"same");
+        assert_eq!(fs::read(&p3).unwrap(), b"other");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// 当前临时目录里 `chunxiao-import-*` 的个数（验证临时文件不残留）

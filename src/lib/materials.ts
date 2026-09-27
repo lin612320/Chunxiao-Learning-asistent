@@ -8,12 +8,14 @@
 // 降级：`!isTauri()`（浏览器预览）时两条命令都走 `data/sample.ts` 的示例数据，
 //       保证 UI 能脱离 Rust 调试。
 
-import { invokeStrict, isTauri } from "./tauri";
+import { callRust, invokeStrict, isTauri } from "./tauri";
 import {
+  loadSampleDb,
   sampleExtractMaterialB64,
   sampleMaterialSearch,
   type ExtractResult,
   type MaterialHit,
+  type MaterialItem,
   type MsgRef,
 } from "../data/sample";
 
@@ -301,4 +303,77 @@ export function refsFromHits(hits: MaterialHit[]): MsgRef[] {
 export function refTitle(r: MsgRef): string {
   const heading = (r.heading ?? "").trim();
   return heading ? `${r.material} · ${heading}` : r.material;
+}
+
+// ---------------------------------------------------------------------------
+// R13：材料原文件 —— 留副本 / 打开 / 定位 / 补路径
+// ---------------------------------------------------------------------------
+
+/**
+ * 把导入的原始文件在**本机留一份副本**，返回可直接交给系统打开的绝对路径。
+ *
+ * 为什么需要：材料的正文是按**字节**提取的（浏览器只给得到字节、给不到绝对路径），
+ * 所以 M1 契约里 `materials.file_path` 一直是空字符串 —— 因此
+ * 「点材料打开原文件」这件事**根本无从谈起**。有了副本，`open_file` 才有东西可开，
+ * 而且用户把原文件移走/删掉之后春晓这边照样能打开。
+ */
+export async function storeMaterialFile(fileName: string, dataB64: string): Promise<string> {
+  return await invokeStrict<string>("material_store_file", { fileName, dataB64 });
+}
+
+/** 给**已有**材料补记真实路径（只改 `file_path` 一列，不碰正文与切块） */
+export async function setMaterialPath(id: number, filePath: string): Promise<void> {
+  await invokeStrict<void>("material_set_path", { id, filePath });
+}
+
+/**
+ * 用**系统默认程序**打开文件（PDF 会打开你的 PDF 阅读器）。
+ * Rust 侧有扩展名白名单，且会先检查文件是否真的还在 ——
+ * 文件被删/被移走时返回可读错误，**不静默失败**。
+ */
+export async function openWithSystem(path: string): Promise<void> {
+  await invokeStrict<void>("open_file", { path });
+}
+
+/** 在资源管理器里定位文件（`explorer /select`） */
+export async function revealInFolder(path: string): Promise<void> {
+  await invokeStrict<void>("reveal_in_folder", { path });
+}
+
+/** 删除材料（切块随外键级联删除） */
+export async function deleteMaterial(id: number): Promise<void> {
+  await invokeStrict<void>("material_delete", { id });
+}
+
+/**
+ * 人类可读的文件大小。**课程页与材料页共用一份** ——
+ * 两处各写一个格式化函数，迟早会在"小于 1 KB 怎么写""一位小数还是两位"上漂移。
+ */
+export function fmtSize(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return "大小未知";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * 读某几门课程的材料。`courseIds = null` 表示**全部课程**（逐课取回后合并）。
+ *
+ * 为什么是逐课取回：`materials_list` 的契约要求必填 `course_id`（M0 冻结），
+ * 不去动它；课程数量是个位数，几次 IPC 完全够用，也避免为一个页面改冻结接口。
+ */
+export async function listMaterials(courseIds: number[] | null): Promise<MaterialItem[]> {
+  if (!isTauri()) {
+    const db = loadSampleDb();
+    return courseIds == null
+      ? db.materials
+      : db.materials.filter((m) => courseIds.includes(m.course_id));
+  }
+  if (courseIds == null) return [];
+  const all: MaterialItem[] = [];
+  for (const cid of courseIds) {
+    const list = await callRust<MaterialItem[]>("materials_list", { courseId: cid });
+    if (Array.isArray(list)) all.push(...list);
+  }
+  return all;
 }
