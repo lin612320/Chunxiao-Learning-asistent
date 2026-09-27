@@ -43,7 +43,20 @@ export type IconName =
   | "pause"
   | "sparkles"
   | "bulb"
-  | "refresh";
+  | "refresh"
+  // R12：笔记沉浸式编辑器的工具栏图标（沿用同一规格手绘，不引图标库）
+  | "bold"
+  | "italic"
+  | "code"
+  | "heading"
+  | "quote"
+  | "listUl"
+  | "listOl"
+  | "link"
+  | "image"
+  | "sigma"
+  | "table"
+  | "divider";
 
 const PATHS: Record<IconName, ReactNode> = {
   home: (
@@ -202,6 +215,76 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M20 4.4V10h-5.6" />
     </>
   ),
+
+  // ---- R12：笔记编辑器工具栏（规格同上：24 视图框 / currentColor 描边） ----
+  bold: (
+    <>
+      <path d="M7.6 4.8h5.2a3.6 3.6 0 0 1 0 7.2H7.6z" />
+      <path d="M7.6 12h6.2a3.6 3.6 0 0 1 0 7.2H7.6z" />
+    </>
+  ),
+  italic: (
+    <>
+      <path d="M15.4 4.8h-4.2M12.8 19.2H8.6" />
+      <path d="M14.6 4.8 10.2 19.2" />
+    </>
+  ),
+  code: (
+    <>
+      <path d="m9.6 8.8-3.6 3.2 3.6 3.2" />
+      <path d="m14.4 8.8 3.6 3.2-3.6 3.2" />
+      <path d="M13.4 6.2 10.6 17.8" />
+    </>
+  ),
+  heading: (
+    <>
+      <path d="M4.8 5.6v12.8M12.4 5.6v12.8M4.8 12h7.6" />
+      <path d="M17 9.6l2-1.2v10.2M16.4 18.6h5" />
+    </>
+  ),
+  quote: (
+    <>
+      <path d="M7.2 5.4v13.2" />
+      <path d="M11.2 8.6h7.2M11.2 12h5.6M11.2 15.4h7.2" />
+    </>
+  ),
+  listUl: (
+    <>
+      <path d="M9.6 6.6h10.2M9.6 12h10.2M9.6 17.4h10.2" />
+      <circle cx="5.6" cy="6.6" r="1.2" />
+      <circle cx="5.6" cy="12" r="1.2" />
+      <circle cx="5.6" cy="17.4" r="1.2" />
+    </>
+  ),
+  listOl: (
+    <>
+      <path d="M10.4 6.6h9.4M10.4 12h9.4M10.4 17.4h9.4" />
+      <path d="M4.6 5.2h1.2v3.6M4.2 8.8h2.2" />
+      <path d="M4 11.6h2.2v1.2l-2.2 2h2.2" />
+      <path d="M4 17h2.2l-2.2 2.4h2.4" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10.4 13.6a3.4 3.4 0 0 0 4.8 0l2.8-2.8a3.4 3.4 0 0 0-4.8-4.8l-1.4 1.4" />
+      <path d="M13.6 10.4a3.4 3.4 0 0 0-4.8 0l-2.8 2.8a3.4 3.4 0 0 0 4.8 4.8l1.4-1.4" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3.6" y="5.4" width="16.8" height="13.2" rx="2.2" />
+      <circle cx="8.8" cy="10.2" r="1.5" />
+      <path d="m5.6 17.8 4.4-4.4 3.2 3.2 2.6-2.6 3.2 3.2" />
+    </>
+  ),
+  sigma: <path d="M17.6 6.2H6.4l5.4 5.8-5.4 5.8h11.2" />,
+  table: (
+    <>
+      <rect x="3.8" y="5.4" width="16.4" height="13.2" rx="1.8" />
+      <path d="M3.8 10h16.4M9.8 10v8.6M15.2 10v8.6" />
+    </>
+  ),
+  divider: <path d="M3.6 12h16.8M6.6 8.4h10.8M6.6 15.6h10.8" />,
 };
 
 export interface IconProps {

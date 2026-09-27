@@ -482,6 +482,17 @@
   word-break: break-all;
 }
 
+/* R12 图片：贴在正文里的大图不能撑破版面。
+   放在 `.notes-doc-body` 作用域下 —— 笔记页的阅读视图与笔记编辑器的预览区
+   共用同一套排版（见 `views/NoteEditor.css` 头部），所以一处定义两处生效。 */
+.notes-doc-body .md-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
 /* 批注高亮（由 `<Markdown marks />` 渲染；点击可编辑 / 删除） */
 .notes-doc-body .md-mark {
   border-radius: 3px;

@@ -1,7 +1,7 @@
 {
   "name": "chunxiao-study",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.9.0",
   "type": "module",
   "description": "春晓学习助手 —— 面向大学生的本地优先学习助手（Tauri 2 + React + TypeScript）",
   "scripts": {
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
+    "katex": "^0.16.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.0"

@@ -13,12 +13,12 @@
 // 不碰 styles.css 的设计令牌，本页样式全部写在 `Notes.css` 里。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useCourses } from "../hooks/useCourses";
 import { useSettings } from "../hooks/useSettings";
 import { useNoteDetail, useNotes } from "../hooks/useNotes";
 import { parseCourseParam } from "../lib/courseScope";
-import Markdown from "../lib/markdown";
+import Markdown, { blockHasInlineMath } from "../lib/markdown";
 import Highlight, { normalizeTerms } from "../lib/highlight";
 import { isTauri } from "../lib/tauri";
 import Icon from "../components/Icon";
@@ -110,6 +110,7 @@ export default function Notes() {
    * 锁定时：不再显示「按课程筛选」（侧栏已经选过课了），列表也只列这门课的笔记。
    */
   const { search } = useLocation();
+  const nav = useNavigate();
   const lockedCourseId = parseCourseParam(search);
 
   // —— 列表 ——
@@ -410,6 +411,20 @@ export default function Notes() {
       setSel(null);
       return;
     }
+
+    // R12：**含行内公式的块不建新批注**。
+    // 公式在 DOM 里既有原文占位（`.md-math-src`）又有 KaTeX 画出来的真字符，于是
+    // `Range.toString()` 数出来的长度比 `blockPlainTexts()` 长（详见 `docs/23` §五）。
+    // 与其存一条**位置注定错**的批注（用户看到的高亮会偏），不如如实说一句不建。
+    // 已有批注不受影响：它们仍然按「原文片段」自动校验与修正，找不回的进「已失效的批注」。
+    if (blockHasInlineMath(detail.note?.content_md ?? "")[blockIndex]) {
+      setSel(null);
+      setNotice(
+        "这一段里有公式：公式在页面上的字符数与纯文本长度对不上，所以**这一段暂不支持新建批注**。已有的批注仍会按原文片段自动校验与修正。",
+      );
+      return;
+    }
+
     const rect = range.getBoundingClientRect();
     const halfW = 175;
     const x = Math.min(Math.max(rect.left + rect.width / 2, halfW + 8), Math.max(halfW + 8, window.innerWidth - halfW - 8));
@@ -417,7 +432,7 @@ export default function Notes() {
     setSel({ blockIndex, start, end, quote, cross, x, y });
     setAnnoColor("yellow");
     setAnnoComment("");
-  }, []);
+  }, [detail.note]);
 
   async function handleAddAnnotation() {
     if (!sel) return;
@@ -895,10 +910,14 @@ export default function Notes() {
                     const info = noteSourceInfo(n.source);
                     return (
                       <li key={n.id} className={"notes-item" + (n.id === selectedId ? " active" : "")}>
+                        {/* R12：**点笔记 = 打开沉浸式编辑页**（用户要求「点笔记有一个单独文件窗口」）。
+                            原来点一下只是在本页右侧预览；批注与导出仍然在那一侧，
+                            所以右下的「阅读」按钮保留原行为，两条路都不丢。 */}
                         <button
                           type="button"
                           className="notes-item-main"
-                          onClick={() => setSelectedId(n.id)}
+                          onClick={() => nav(`/note/${n.id}`)}
+                          title="打开编辑器（写正文、贴图片、写公式）"
                         >
                           <span className="notes-item-title">{n.title}</span>
                           <span className="notes-item-meta">
@@ -907,6 +926,13 @@ export default function Notes() {
                             <span className="tag">{n.content_len} 字</span>
                             <span className="muted">{courseNameOf(courses, n.course_id)}</span>
                           </span>
+                        </button>
+                        <button
+                          className="ghost-btn"
+                          onClick={() => setSelectedId(n.id)}
+                          title="在本页阅读这条笔记（看批注 / 导出）"
+                        >
+                          阅读
                         </button>
                         <button
                           className="danger-btn"

@@ -1,0 +1,236 @@
+/* ==========================================================================
+   R12 · 笔记沉浸式编辑器（`views/NoteEditor.tsx`）
+
+   设计取舍（写在最前面，免得后来者重复判断）：
+   1. **不重写 Markdown 的排版样式**：渲染器（`lib/markdown.tsx`）的排版规则全部挂在
+      `.notes-doc-body` 作用域下，并且只作用于"它自己的后代"。所以这里让编辑器外壳
+      带上 `.notes-page`（只为拿到那五个批注色变量）、预览区带上 `.notes-doc-body`，
+      于是标题字号 / 代码块 / 表格 / 批注高亮**一套样式两处共用**，不会出现
+      "笔记页和编辑器里同一段 Markdown 长得不一样"。
+   2. 本文件只负责**编辑器自己的骨架**：顶栏 / 工具栏 / 编辑区 / 预览区 / 底栏。
+   3. 公式（KaTeX）自带样式表（`lib/math.tsx` 里 import），这里只补**超宽公式的横向滚动**——
+      KaTeX 默认会把行间公式撑出容器，长公式在窄栏里必须能滚，不能把布局顶破。
+   ========================================================================== */
+
+/* 无干扰外壳：编辑页占满窗口，不出现侧栏与顶栏（由 `components/Layout.tsx` 决定） */
+.editor-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.editor-shell-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------------- 顶栏 ---------------- */
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.editor-back {
+  transform: rotate(180deg);
+}
+
+.editor-title {
+  flex: 1;
+  min-width: 180px;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+
+.editor-title:hover {
+  border-color: var(--border);
+}
+
+.editor-title:focus {
+  outline: none;
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+}
+
+.editor-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 未保存状态：虚线描边，不抢眼但一眼能看到 */
+.editor-dirty {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.editor-notice {
+  white-space: pre-wrap;
+}
+
+/* ---------------- 工具栏 ---------------- */
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+  flex-wrap: wrap;
+}
+
+.editor-toolgroup {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
+}
+
+.editor-toolgroup:last-child {
+  border-right: none;
+  padding-right: 0;
+}
+
+.editor-tool {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.editor-tool:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.editor-tool:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 用文字当图标的那两个（``` 与 $$）：等宽字体，免得和其它图标胖瘦不一 */
+.editor-tool-tex {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  font-size: var(--fs-xs);
+  letter-spacing: -0.5px;
+}
+
+/* ---------------- 正文区（编辑 / 分栏 / 预览） ---------------- */
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.editor-textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px 18px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  font-size: 13.5px;
+  line-height: 1.85;
+  tab-size: 2;
+}
+
+/* 分栏模式：左写右看，中间一条发丝线 */
+.editor-body.mode-split .editor-textarea {
+  border-right: 1px solid var(--border);
+}
+
+.editor-preview {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px;
+  background: var(--surface);
+}
+
+/* 窄窗口下分栏改成上下堆叠：左右各半在 800px 以下两边都不够写 */
+@media (max-width: 820px) {
+  .editor-body.mode-split {
+    flex-direction: column;
+  }
+
+  .editor-body.mode-split .editor-textarea {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* ---------------- 公式 ---------------- */
+
+/* 长公式横向滚动，别把布局顶破；行间公式上下留一点呼吸 */
+.editor-preview .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+.editor-preview .katex {
+  font-size: 1.06em;
+}
+
+/* 公式渲染失败时 KaTeX 会把源码显示出来（`throwOnError: false`）——
+   给它一个"这是没能渲染的公式源码"的观感，而不是伪装成正常公式。 */
+.editor-preview .katex-error {
+  color: #c0392b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+}
+
+/* ---------------- 底栏 ---------------- */
+
+.editor-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.editor-foot .ghost-btn {
+  margin-left: auto;
+}

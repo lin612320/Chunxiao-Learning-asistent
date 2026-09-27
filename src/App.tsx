@@ -12,6 +12,7 @@ import Notes from "./views/Notes";
 //   "某页被换回占位页"这类退化。
 import Questions from "./views/Questions";
 import Profile from "./views/Profile";
+import NoteEditor from "./views/NoteEditor";
 
 /**
  * 路由表（R6：改成**课程优先**）。
@@ -38,6 +39,9 @@ export default function App() {
 
           {/* M3 已落地：笔记与专注计时（不再是占位页） */}
           <Route path="/notes" element={<Notes />} />
+          {/* R12：笔记的**沉浸式编辑器**（独立文档视图）。`Layout` 见到 `/note/` 前缀会
+              换成无干扰外壳（不渲染侧栏与顶栏），返回入口在编辑器自己的顶栏里。 */}
+          <Route path="/note/:id" element={<NoteEditor />} />
           <Route path="/focus" element={<Focus />} />
 
           {/* M4 已落地：题库与学习画像（不再是占位页） */}

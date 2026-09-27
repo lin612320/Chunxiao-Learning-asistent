@@ -165,5 +165,17 @@ export default defineConfig({
     target: "es2021",
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_DEBUG,
+    rollupOptions: {
+      output: {
+        // R12：KaTeX 单独成块。
+        // 为什么不直接让它并进主包：主包从 392 kB 涨到 669 kB，**跨过 vite 的 500 kB 阈值**，
+        // 每次构建都会打一条 chunk 过大的警告 —— 本项目历来把"构建 0 warning"当作口径，
+        // 不该因为引入公式能力就默认接受一条长期警告。
+        // 拆开还有实际好处：公式只在"正文里真的有 $…$"时才需要解析，主包能更快就绪。
+        manualChunks: {
+          katex: ["katex"],
+        },
+      },
+    },
   },
 });

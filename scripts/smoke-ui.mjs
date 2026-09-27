@@ -915,6 +915,197 @@ async function main() {
       JSON.stringify(enterBehavior),
     );
 
+    // ---------------- R12：课程选择器跟随新建课程 + 笔记沉浸式编辑器 ----------------
+    //
+    // 用户报的两个问题（原话）：
+    //   ①「创建课程后主页左上角顶部的课程选择没有跟着更新」
+    //   ②「笔记需要支持多模态……点笔记有一个单独文件窗口」
+    //
+    // ① 的根因是 `useCourses` 原来**每个组件各持一份 useState 副本**（共 10 份），
+    //    只有发起写入的那一份会 refresh；侧栏选择器与顶栏胶囊是常驻组件，永远读不到新课。
+    //    ⇒ 本段的关键是**不重新导航**（SPA 内切路由不会重载页面）：建完课直接读 DOM，
+    //      这样"共享存储有没有真的广播"才会被验证到；一旦改回独立副本，它就会红。
+    // ② 断言编辑页真的打开、工具栏齐、Markdown 有排版、**公式真的渲染成 KaTeX**、
+    //    **图片真的能进正文**（用真实 File + DataTransfer 走 input[type=file]）。
+    console.log("\n[12/12] R12：课程选择器跟随 · 笔记沉浸式编辑器（多模态）");
+
+    await goto(session, "/#/courses");
+    const pickerBefore = await session.eval(
+      `(() => { const s = document.querySelector('.course-picker select'); return s ? [...s.options].map(o => o.textContent.trim()) : null; })()`,
+    );
+    const created = await session.eval(`(async () => {
+      const name = '冒烟新课 ' + Date.now();
+      const openBtn = [...document.querySelectorAll('button')].find(b => /新建课程/.test(b.textContent || ''));
+      if (!openBtn) return { ok: false, why: '没找到「新建课程」按钮' };
+      openBtn.click();
+      await new Promise(r => setTimeout(r, 200));
+
+      // React 受控 input：必须走原生 setter + input 事件，直接改 .value 不会触发 onChange
+      const input = document.querySelector('.form-grid input');
+      if (!input) return { ok: false, why: '没找到课程名称输入框' };
+      const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      set.call(input, name);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 120));
+
+      const createBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '创建课程');
+      if (!createBtn) return { ok: false, why: '没找到「创建课程」提交按钮' };
+      createBtn.click();
+      // 这里**刻意不导航、不刷新**：等的就是共享存储把新课广播给侧栏与顶栏
+      await new Promise(r => setTimeout(r, 900));
+
+      const sel = document.querySelector('.course-picker select');
+      const opts = sel ? [...sel.options].map(o => o.textContent.trim()) : [];
+      const chip = document.querySelector('.course-chip');
+      return {
+        ok: true,
+        name,
+        opts,
+        hasNew: opts.some(t => t.includes(name)),
+        selected: sel ? sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent.trim() : '' : '',
+        chip: chip ? (chip.textContent || '').trim() : '',
+        hash: location.hash,
+      };
+    })()`);
+
+    ok("侧栏课程选择器在新建课程后**无需刷新**就出现新课", !!(created.ok && created.hasNew),
+      JSON.stringify({ before: pickerBefore, after: created.opts, why: created.why }));
+    ok("新建的课立刻成为当前课程（选择器选中它）", !!(created.ok && created.selected.includes(created.name)),
+      "selected=" + created.selected);
+    ok("顶栏「当前课程」胶囊同步出现新课名", !!(created.ok && created.chip.includes(created.name)),
+      "chip=" + created.chip);
+
+    // —— 编辑页：从笔记列表点进去 ——
+    await goto(session, "/#/notes");
+    const opened = await session.eval(`(async () => {
+      const main = document.querySelector('.notes-item-main');
+      if (!main) return { ok: false, why: '笔记列表里没有条目' };
+      main.click();
+      await new Promise(r => setTimeout(r, 900));
+      return {
+        ok: true,
+        hash: location.hash,
+        shell: !!document.querySelector('.editor-shell-inner'),
+        // 沉浸式：编辑页**不该**有侧栏与顶栏
+        noSidebar: !document.querySelector('.sidebar'),
+        noTopbar: !document.querySelector('.topbar'),
+        toolbar: document.querySelectorAll('.editor-tool').length,
+        hasTextarea: !!document.querySelector('.editor-textarea'),
+        hasPreview: !!document.querySelector('.editor-preview'),
+      };
+    })()`);
+    ok("点笔记进入独立编辑页（路由 /note/:id）", !!(opened.ok && /^#\/note\/\d+$/.test(opened.hash)), JSON.stringify(opened));
+    ok("编辑页是沉浸式外壳（没有侧栏与顶栏）", !!(opened.shell && opened.noSidebar && opened.noTopbar), JSON.stringify(opened));
+    ok("编辑页有工具栏 + 编辑区 + 预览区", !!(opened.toolbar >= 10 && opened.hasTextarea && opened.hasPreview),
+      JSON.stringify(opened));
+
+    // —— 多模态：正文输入 → 排版 + 公式（KaTeX）真的渲染 ——
+    //    只断言 KaTeX 自己的 `.katex` / `.katex-display` 类，不依赖渲染器的包装类名。
+    //    ⚠ 正文里全是反斜杠（LaTeX）：**不要**手写进模板字符串的转义里 ——
+    //      在 Node 侧组好后用 `JSON.stringify` 注入，转义由 JSON 负责，可读也可复核。
+    const mdForRender = [
+      "# 主标题",
+      "",
+      "## 副标题",
+      "",
+      "行内公式：$E = mc^2$ 收尾。",
+      "",
+      "$$",
+      "\\int_0^1 x^2 \\, dx = \\frac{1}{3}",
+      "$$",
+      "",
+      "```js",
+      "const a = 1;",
+      "```",
+    ].join("\n");
+    const rendered = await session.eval(`(async () => {
+      const ta = document.querySelector('.editor-textarea');
+      if (!ta) return { ok: false, why: '没有正文输入框' };
+      const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      const md = ${JSON.stringify(mdForRender)};
+      set.call(ta, md);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 600));
+      const pv = document.querySelector('.editor-preview');
+      if (!pv) return { ok: false, why: '没有预览区' };
+      return {
+        ok: true,
+        h1: pv.querySelectorAll('.md-h1').length,
+        h2: pv.querySelectorAll('.md-h2').length,
+        pre: pv.querySelectorAll('.md-pre').length,
+        // KaTeX 渲染成功的标志：存在 .katex 元素，且**没有** .katex-error
+        katex: pv.querySelectorAll('.katex').length,
+        katexDisplay: pv.querySelectorAll('.katex-display').length,
+        katexError: pv.querySelectorAll('.katex-error').length,
+        plainHasDollar: /\\$E = mc\\^2\\$/.test(pv.innerText || ''),
+        dirty: (document.querySelector('.editor-dirty') || {}).textContent || '',
+      };
+    })()`);
+    ok("编辑器预览渲染主/副标题（字号层级）", !!(rendered.ok && rendered.h1 === 1 && rendered.h2 === 1), JSON.stringify(rendered));
+    ok("编辑器预览渲染代码块", !!(rendered.ok && rendered.pre === 1), JSON.stringify(rendered));
+    ok("行内公式渲染成 KaTeX（且不再是 $…$ 源码）",
+      !!(rendered.ok && rendered.katex >= 1 && rendered.katexError === 0 && rendered.plainHasDollar === false),
+      JSON.stringify(rendered));
+    ok("块级公式渲染成居中 KaTeX（.katex-display）", !!(rendered.ok && rendered.katexDisplay >= 1), JSON.stringify(rendered));
+    ok("改动后状态标「未保存」", !!(rendered.ok && rendered.dirty.includes("未保存")), "dirty=" + rendered.dirty);
+
+    // —— 多模态：图片走真实 File + DataTransfer（**真的能贴进正文**） ——
+    const imgIn = await session.eval(`(async () => {
+      const input = document.querySelector('.editor-toolbar input[type=file]');
+      if (!input) return { ok: false, why: '没找到图片文件输入框' };
+      const c = document.createElement('canvas');
+      c.width = 12; c.height = 12;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(0, 0, 12, 12);
+      const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+      if (!blob) return { ok: false, why: 'canvas 没能产出 PNG' };
+      const dt = new DataTransfer();
+      dt.items.add(new File([blob], '冒烟图片.png', { type: 'image/png' }));
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 1200));
+      const ta = document.querySelector('.editor-textarea');
+      const pv = document.querySelector('.editor-preview');
+      return {
+        ok: true,
+        inText: /!\\[[^\\]]*\\]\\(data:image\\/png;base64,/.test((ta || {}).value || ''),
+        rendered: pv ? pv.querySelectorAll('img[src^="data:image"]').length : -1,
+      };
+    })()`);
+    ok("图片插入正文（dataURL 内联进 content_md）", !!(imgIn.ok && imgIn.inText), JSON.stringify(imgIn));
+    ok("插入的图片在预览里真的渲染出来", !!(imgIn.ok && imgIn.rendered >= 1), JSON.stringify(imgIn));
+
+    // —— 视图模式切换（编辑 / 分栏 / 预览） ——
+    const modeSwitch = await session.eval(`(async () => {
+      const btn = [...document.querySelectorAll('.editor-bar-right .chip')].find(b => b.textContent.trim() === '预览');
+      if (!btn) return { ok: false, why: '没找到「预览」切换按钮' };
+      btn.click();
+      await new Promise(r => setTimeout(r, 300));
+      const only = {
+        textarea: !!document.querySelector('.editor-textarea'),
+        preview: !!document.querySelector('.editor-preview'),
+      };
+      const back = [...document.querySelectorAll('.editor-bar-right .chip')].find(b => b.textContent.trim() === '分栏');
+      if (back) back.click();
+      await new Promise(r => setTimeout(r, 300));
+      return { ok: true, only, split: !!document.querySelector('.editor-textarea') && !!document.querySelector('.editor-preview') };
+    })()`);
+    ok("切「预览」只留渲染结果（编辑区隐藏）", !!(modeSwitch.ok && !modeSwitch.only.textarea && modeSwitch.only.preview), JSON.stringify(modeSwitch));
+    ok("切回「分栏」编辑区与预览区都在", !!(modeSwitch.ok && modeSwitch.split), JSON.stringify(modeSwitch));
+
+    // —— 保存：浏览器预览下**如实**报"仅桌面版可用"，不假装保存成功 ——
+    const saveAttempt = await session.eval(`(async () => {
+      const btn = [...document.querySelectorAll('.editor-bar-right button')].find(b => b.textContent.trim() === '保存');
+      if (!btn) return { ok: false, why: '没找到「保存」按钮' };
+      btn.click();
+      await new Promise(r => setTimeout(r, 700));
+      const err = document.querySelector('.settings-msg.err');
+      return { ok: true, text: err ? (err.textContent || '').trim() : '' };
+    })()`);
+    ok("预览模式下保存如实报错（不假装保存成功）",
+      !!(saveAttempt.ok && /桌面版/.test(saveAttempt.text)),
+      JSON.stringify(saveAttempt));
+
     // ---------------- 资源与 console 总检查 ----------------
     console.log("\n[汇总检查] 资源与 console 报错");
     const uniqBad = [...new Set(badResponses)];
