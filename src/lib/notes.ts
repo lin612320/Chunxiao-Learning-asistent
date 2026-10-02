@@ -21,8 +21,14 @@ import { blockPlainTexts, type MdMark } from "./markdown";
 // 类型与常量（字段名与 SQL 列名逐字一致）
 // ---------------------------------------------------------------------------
 
-/** 笔记来源：`ai_session`（AI 依据某次对话整理）/ `user`（用户自己写的） */
-export type NoteSource = "ai_session" | "user";
+/** 笔记来源：`ai_session`（AI 依据某次对话整理）/ `user`（用户自己写的）/ `ink`（触控笔手写，R14） */
+export type NoteSource = "ai_session" | "user" | "ink";
+
+/**
+ * R14：手写笔记的来源值。
+ * ⚠ 后端 `src-tauri/src/db.rs` 的 `NOTE_SOURCES` 是**白名单**，两处必须同时改，否则 `note_save` 会拒绝。
+ */
+export const INK_NOTE_SOURCE = "ink";
 
 /** 批注挂载对象类型（后端 `target_kind`） */
 export const NOTE_TARGET_KIND = "note";
@@ -73,11 +79,28 @@ export interface AnnotationRow {
 }
 
 /** 来源徽标口径（列表与详情共用；AI 整理的内容一律标「待核对」） */
-export function noteSourceInfo(source: string): { text: string; cls: string; ai: boolean } {
-  if ((source ?? "").trim() === "ai_session") {
-    return { text: "AI 整理 · 待核对", cls: "src-badge src-ai", ai: true };
+export function noteSourceInfo(source: string): {
+  text: string;
+  cls: string;
+  ai: boolean;
+  /** R14：手写笔记 —— 列表页据此**不显示"字数"**（那是图片与笔迹数据的字符数，不是字数） */
+  ink: boolean;
+} {
+  const s = (source ?? "").trim();
+  if (s === "ai_session") {
+    return { text: "AI 整理 · 待核对", cls: "src-badge src-ai", ai: true, ink: false };
   }
-  return { text: "自己写的", cls: "src-badge src-user", ai: false };
+  // R14：手写笔记。**必须单独一类**：它的 content_md 里内联着 PNG（base64），
+  // `content_len` 因此是"图片与笔迹数据的字符数"，拿它当"正文字数"显示会得到几十万这种离谱数字。
+  if (s === INK_NOTE_SOURCE) {
+    return { text: "手写", cls: "src-badge src-ink", ai: false, ink: true };
+  }
+  return { text: "自己写的", cls: "src-badge src-user", ai: false, ink: false };
+}
+
+/** 这是不是一条手写笔记（**以 source 为准**：列表页拿不到正文，不能靠扫 content_md 判断） */
+export function isInkNote(source: string | null | undefined): boolean {
+  return (source ?? "").trim() === INK_NOTE_SOURCE;
 }
 
 function errText(e: unknown): string {

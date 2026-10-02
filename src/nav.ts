@@ -19,6 +19,8 @@ const PAGES: Array<{ key: string; label: string; match: (pathname: string) => bo
   { key: "courses", label: "课程", match: (p) => p === "/courses" || p === "/" },
   { key: "course", label: "课程", match: (p) => p.startsWith("/course/") },
   { key: "notes", label: "笔记", match: (p) => p === "/notes" },
+  // R14：手写笔记（触控笔页）。两个路由都要匹配：`/handwrite` 新建、`/handwrite/:id` 继续写
+  { key: "handwrite", label: "手写笔记", match: (p) => p === "/handwrite" || p.startsWith("/handwrite/") },
   { key: "materials", label: "相关材料", match: (p) => p === "/materials" },
   { key: "questions", label: "题库", match: (p) => p === "/questions" },
   { key: "profile", label: "学习画像", match: (p) => p === "/profile" },

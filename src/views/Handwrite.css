@@ -1,0 +1,540 @@
+/* ==========================================================================
+   R14 · 触控笔手写笔记页（`views/Handwrite.tsx`）
+
+   设计取舍（写在最前面，免得后来者重复判断）：
+   1. **平板优先，但不是"平板专用"**：默认布局是「左工具轨 + 右画布」；
+      宽度 < 900px（手机 / 竖屏平板）时工具轨**变成横向工具条**沉到底部 ——
+      横排按钮在竖屏下比竖排更适合拇指，也不会把画布压成一条缝。
+   2. **一切可点元素 ≥ 40px**：手写场景下手指/笔尖的精度远低于鼠标，
+      `styles.css` 里那套 28px 的按钮在这里普遍不够用，所以本文件给触控目标单独放大。
+   3. **画布必须吃掉所有手势**：`touch-action: none` + `overscroll-behavior: contain`，
+      否则在平板上"写字"会被浏览器的滚动/下拉刷新/双击缩放抢走（这是移动端手写最常见的翻车点）。
+   4. **不重写 Markdown 排版**：本页不渲染 Markdown，样式自成一套，只复用设计令牌。
+   ========================================================================== */
+
+.hw-page {
+  /* `.editor-shell` / `.editor-shell-inner` 的 flex 骨架来自 `NoteEditor.css`
+     （由 R12 的沉浸式编辑器引入，Vite 打包后全站可用）。这里只补本页特有的部分。 */
+  background: var(--surface-muted);
+}
+
+/* ---------------- 顶栏 ---------------- */
+
+.hw-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.hw-title {
+  flex: 1;
+  min-width: 160px;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+}
+
+.hw-title:hover {
+  border-color: var(--border);
+}
+
+.hw-title:focus {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.hw-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hw-course {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.hw-course select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.hw-dirty {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  min-width: 62px;
+  text-align: right;
+}
+
+/* ---------------- 主体：左工具轨 + 右画布 ---------------- */
+
+.hw-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.hw-tools {
+  width: 172px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 10px;
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.hw-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hw-tool-row {
+  flex-direction: row;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.hw-group-label {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: var(--track-wide, 0.04em);
+  color: var(--text-faint);
+  text-transform: none;
+}
+
+/* 工具按钮：图标 + 文字，40px 高（触控目标下限） */
+.hw-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.hw-tool:hover {
+  background: var(--surface-hover);
+}
+
+.hw-tool.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-weight: 600;
+}
+
+.hw-tool-label {
+  white-space: nowrap;
+}
+
+/* 纯图标按钮（撤销/重做/缩放/翻页）：40×40 */
+.hw-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hw-tool-icon:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.hw-tool-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 颜色：36px 圆点（比 40px 略小但保持间距，避免色板占地过大） */
+.hw-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hw-color {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+
+.hw-color.on {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--surface-muted);
+}
+
+.hw-size {
+  width: 100%;
+  min-height: 32px;
+}
+
+/* 开关型按钮（输入方式 / 自检） */
+.hw-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.hw-switch.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-weight: 600;
+}
+
+.hw-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+}
+
+/* ---------------- R14b：标注符号 / 选区动作条 / 文字稿面板 ---------------- */
+
+/* 工具按钮上显示"当前符号"（而不是一个通用图标）：一眼看出点下去会盖什么 */
+.hw-tool-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.hw-glyphs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.hw-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.hw-glyph:hover {
+  background: var(--surface-hover);
+}
+
+.hw-glyph.on {
+  border-width: 2px;
+  background: var(--surface-sunken);
+  font-weight: 700;
+}
+
+/* 选区动作条：有选区时出现在工具条下方（**不占位**：没选区就没有这一行） */
+.hw-selbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--brand-soft);
+  font-size: var(--fs-sm);
+}
+
+.hw-selbar-info {
+  font-weight: 600;
+  color: var(--brand-text);
+}
+
+/* 文字稿面板（识别为文字的结果） */
+.hw-ocr-panel {
+  margin: 8px 12px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.hw-ocr-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.hw-ocr-body {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--dsw-font-family);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--surface-sunken);
+}
+
+/* ---------------- 画布区 ---------------- */
+
+.hw-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hw-stage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.hw-subgroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hw-zoom,
+.hw-pages {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  min-width: 58px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.hw-ocr-msg {
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--brand-tint, var(--border));
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+/* 笔自检面板：只读诊断，不喧宾夺主 */
+.hw-diag {
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hw-diag-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  color: var(--text);
+}
+
+.hw-diag-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.hw-diag-table th,
+.hw-diag-table td {
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  text-align: left;
+  font-weight: 400;
+}
+
+.hw-diag-table th {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+/* 画布容器：**必须吃掉所有手势**，否则写字会被浏览器滚动/缩放抢走 */
+.hw-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: contain;
+  /* 桌面色：比纸面暗一档，纸张边界才看得出来 */
+  background: var(--surface-sunken);
+  background-image: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+.hw-canvas {
+  display: block;
+  touch-action: none;
+  /* 笔/鼠标用十字准星；触控下光标不可见，无副作用 */
+  cursor: crosshair;
+  /* 长按不要弹系统菜单 / 不要被选中（触控手写的必备设置） */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.hw-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- 窄屏（手机 / 竖屏平板）：工具轨改成横向底栏 ---------------- */
+
+@media (max-width: 900px) {
+  .hw-body {
+    flex-direction: column;
+  }
+
+  .hw-tools {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    /* 沉到底部：拇指区，横排按钮更好点 */
+    order: 2;
+  }
+
+  .hw-tool-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .hw-colors {
+    flex-wrap: nowrap;
+  }
+
+  .hw-tool-label {
+    display: none; /* 横向空间宝贵：只留图标，语义由 title / aria-label 承担 */
+  }
+
+  .hw-tool {
+    padding: 6px 10px;
+  }
+
+  .hw-stage-bar {
+    gap: 8px;
+  }
+}
+
+/* 竖屏且很窄：把"输入方式"和自检收成纯图标，别把工具条挤爆 */
+@media (max-width: 560px) {
+  .hw-switch {
+    padding: 6px 8px;
+    font-size: 0; /* 只留图标 */
+    gap: 0;
+  }
+
+  .hw-foot > span:nth-child(4) {
+    display: none; /* "笔迹数据 xx KB" 在最窄屏下不显示 */
+  }
+}
+
+/* ---------------- 打印 / 另存为 PDF ---------------- */
+
+/* 平时不存在的打印容器（由 `printAll()` 临时创建）；只在 `body.hw-printing` 下可见 */
+.hw-print-holder {
+  display: none;
+}
+
+@media print {
+  body.hw-printing > *:not(.hw-print-holder) {
+    display: none !important;
+  }
+
+  body.hw-printing .hw-print-holder {
+    display: block;
+  }
+
+  body.hw-printing .hw-print-holder img {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  body.hw-printing .hw-print-holder img:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+}

@@ -19,8 +19,11 @@ import { courseOptionLabel } from "../lib/courseScope";
  *
  * 「当前课程」的单一事实来源：`?course=N`（URL）优先，其次 `localStorage`
  * （沿用 R1 的 `chunxiao:last-course-id`，与对话页同一套口径，不另造一个状态）。
+ *
+ * R14：加两个入口 —— ①「手写笔记」（触控笔页）；②窄屏下点完导航**自动收起抽屉**
+ *   （`onNavigate` 由 `Layout` 传入；宽屏下它什么都不做，因为那时侧栏是常驻的）。
  */
-export default function Sidebar() {
+export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const { courses, loading } = useCourses();
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
@@ -86,6 +89,7 @@ export default function Sidebar() {
       end={end}
       className={({ isActive }) => "nav-item" + (isActive ? " active" : "")}
       title={label}
+      onClick={onNavigate}
     >
       <Icon name={icon} className="nav-icon" />
       <span className="nav-label">{label}</span>
@@ -128,6 +132,8 @@ export default function Sidebar() {
           <>
             {item(`/course/${active.id}`, "book", "课程总览", true)}
             {item(withCourse("/notes"), "note", "笔记")}
+            {/* R14：触控笔手写（平板优先的入口，与「笔记」并列 —— 它们是同一层级的两种记法） */}
+            {item(withCourse("/handwrite"), "pen", "手写笔记")}
             {/* R13：用户要求「在侧栏添加一个相关材料，点击材料可以直接打开」 */}
             {item(withCourse("/materials"), "folder", "相关材料")}
             {item(withCourse("/questions"), "help", "题库")}
@@ -138,6 +144,7 @@ export default function Sidebar() {
           <>
             {item("/courses", "book", "课程列表")}
             {item("/notes", "note", "全部笔记")}
+            {item("/handwrite", "pen", "手写笔记")}
             {item("/materials", "folder", "相关材料")}
             {item("/questions", "help", "全部题库")}
             {item("/profile", "chart", "学习画像")}

@@ -696,23 +696,36 @@ export default function Notes() {
         {!manualOpen ? (
           <div className="notes-list-head" style={{ marginBottom: 0 }}>
             <h3 style={{ margin: 0 }}>自己写一条</h3>
-            <button
-              className="primary small"
-              disabled={manualCourseId == null}
-              title={
-                manualCourseId == null
-                  ? "还没有课程：先在「课程」页新建一门"
-                  : "直接写一条笔记（来源标「自己写的」）"
-              }
-              onClick={() => {
-                setManualOpen(true);
-                setManualErr(null);
-                setManualTitle("");
-                setManualContent("");
-              }}
-            >
-              <Icon name="plus" size={15} /> 新建笔记
-            </button>
+            {/* R14：手写入口与打字入口并列 —— 平板用户的第一反应是"拿笔写"，
+                把入口埋在别处等于没有这个功能 */}
+            <div className="notes-gen-bar" style={{ margin: 0 }}>
+              <button
+                className="ghost-btn"
+                title="用触控笔（或手指 / 鼠标）在纸上写，写完整页再保存"
+                onClick={() =>
+                  nav(manualCourseId == null ? "/handwrite" : `/handwrite?course=${manualCourseId}`)
+                }
+              >
+                <Icon name="pen" size={15} /> 手写一条
+              </button>
+              <button
+                className="primary small"
+                disabled={manualCourseId == null}
+                title={
+                  manualCourseId == null
+                    ? "还没有课程：先在「课程」页新建一门"
+                    : "直接写一条笔记（来源标「自己写的」）"
+                }
+                onClick={() => {
+                  setManualOpen(true);
+                  setManualErr(null);
+                  setManualTitle("");
+                  setManualContent("");
+                }}
+              >
+                <Icon name="plus" size={15} /> 新建笔记
+              </button>
+            </div>
           </div>
         ) : (
           <>
@@ -912,18 +925,21 @@ export default function Notes() {
                       <li key={n.id} className={"notes-item" + (n.id === selectedId ? " active" : "")}>
                         {/* R12：**点笔记 = 打开沉浸式编辑页**（用户要求「点笔记有一个单独文件窗口」）。
                             原来点一下只是在本页右侧预览；批注与导出仍然在那一侧，
-                            所以右下的「阅读」按钮保留原行为，两条路都不丢。 */}
+                            所以右下的「阅读」按钮保留原行为，两条路都不丢。
+                            R14：手写笔记点进去是**手写页**（继续用笔写），不是 Markdown 文本框。 */}
                         <button
                           type="button"
                           className="notes-item-main"
-                          onClick={() => nav(`/note/${n.id}`)}
-                          title="打开编辑器（写正文、贴图片、写公式）"
+                          onClick={() => nav(info.ink ? `/handwrite/${n.id}` : `/note/${n.id}`)}
+                          title={info.ink ? "继续用触控笔写这一页" : "打开编辑器（写正文、贴图片、写公式）"}
                         >
                           <span className="notes-item-title">{n.title}</span>
                           <span className="notes-item-meta">
                             <span className={info.cls}>{info.text}</span>
                             {n.exported ? <span className="tag notes-tag-ok">已导出</span> : null}
-                            <span className="tag">{n.content_len} 字</span>
+                            {/* R14：手写笔记的 content_len 是"图片 + 笔迹数据的字符数"（几十万那种），
+                                拿它当"字数"显示是**误导**，所以手写笔记一律不显示这个标签 */}
+                            {info.ink ? <span className="tag">触控笔</span> : <span className="tag">{n.content_len} 字</span>}
                             <span className="muted">{courseNameOf(courses, n.course_id)}</span>
                           </span>
                         </button>
@@ -974,9 +990,16 @@ export default function Notes() {
                 <span className="muted" style={{ fontSize: 12 }}>
                   {PDF_HINT}（打印样式只输出正文，不含列表与批注面板）
                 </span>
-                <button className="ghost-btn" onClick={editing ? () => setEditing(false) : startEditNote}>
-                  {editing ? "退出编辑" : "编辑标题 / 正文"}
-                </button>
+                {/* R14：手写笔记的"编辑"是**用笔继续写**，不是改 Markdown */}
+                {src.ink ? (
+                  <button className="ghost-btn" onClick={() => nav(`/handwrite/${detail.note!.id}`)}>
+                    <Icon name="pen" size={14} /> 用触控笔继续写
+                  </button>
+                ) : (
+                  <button className="ghost-btn" onClick={editing ? () => setEditing(false) : startEditNote}>
+                    {editing ? "退出编辑" : "编辑标题 / 正文"}
+                  </button>
+                )}
               </div>
 
               <div className="notes-export-dir no-print">
@@ -1063,9 +1086,10 @@ export default function Notes() {
                     <span className={src.cls}>{src.text}</span>
                     <span className="tag">{detail.note.date || "未标日期"}</span>
                     {detail.note.exported ? <span className="tag notes-tag-ok">已导出</span> : null}
+                    {/* R14：手写笔记的 content_len 是图片 + 笔迹数据的字符数，不能当"字数"读 */}
                     <span className="muted">
-                      {courseNameOf(courses, detail.note.course_id)} · {detail.note.content_len} 字 ·{" "}
-                      {detail.note.created_at}
+                      {courseNameOf(courses, detail.note.course_id)} ·{" "}
+                      {src.ink ? "手写页" : `${detail.note.content_len} 字`} · {detail.note.created_at}
                     </span>
                   </div>
                   {src.ai && (

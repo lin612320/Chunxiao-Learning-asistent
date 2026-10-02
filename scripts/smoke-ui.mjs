@@ -1180,6 +1180,289 @@ async function main() {
       !!(openClick.ok && /桌面版/.test(openClick.text)),
       JSON.stringify(openClick));
 
+    // ---------------- R14：触控笔手写笔记（平板优先） ----------------
+    //
+    // 这一段分两层，**两层都必须过**：
+    //   ① **墨迹引擎的纯逻辑**（`lib/ink.ts`）：在真实浏览器里动态 import 这个模块跑一遍
+    //      —— 序列化往返、坏数据拒绝、橡皮断笔、撤销/重做、压感与线宽映射。
+    //      这层是"手写到底对不对"的地基，比 UI 层的像素断言更值得测；
+    //   ② **手写页真的能写**：用**合成 PointerEvent**（pointerType='pen' + pressure）在画布上
+    //      写一笔，然后用 `getImageData` 数**真的画上去了**的非白像素（不是只看"有没有报错"）。
+    console.log("\n[14/14] R14：触控笔手写（引擎纯逻辑 + 画布真的落墨）");
+
+    const engine = await session.eval(`(async () => {
+      const ink = await import('/src/lib/ink.ts');
+      const doc = ink.emptyDoc('grid');
+      const h = ink.newHistory();
+      ink.commitAddStroke(doc, h, 0, {
+        tool: 'pen', color: '#1f2328', size: 3,
+        pts: [{ x: 10, y: 10, p: 0.2 }, { x: 60, y: 80, p: 0.9 }, { x: 120, y: 40, p: 0.5 }],
+      });
+      const orig = doc.pages[0].strokes[0].pts.length;
+      const back = ink.parseDoc(ink.serializeDoc(doc));
+      const bad1 = ink.parseDoc('{"v":1,"pages":[{"paper":"grid"}]}');
+      const bad2 = ink.parseDoc('not json');
+      const strokes = [{ tool: 'pen', color: '#000000', size: 3,
+        pts: Array.from({ length: 30 }, (_, i) => ({ x: i * 10, y: 50, p: 0.5 })) }];
+      const after = ink.eraseAt(strokes, 150, 50, 12);
+      const undone = ink.undo(doc, h);
+      const nAfterUndo = doc.pages[0].strokes.length;
+      const redone = ink.redo(doc, h);
+      const nAfterRedo = doc.pages[0].strokes.length;
+      const bgBad = ink.parseDoc('{"v":1,"pages":[{"paper":"grid","w":10,"h":10,"strokes":[],"bg":"javascript:alert(1)"}]}');
+      return {
+        points: back ? back.pages[0].strokes[0].pts.length : -1,
+        orig,
+        paper: back ? back.pages[0].paper : null,
+        bad1: bad1 === null, bad2: bad2 === null,
+        runsAfterErase: after.length,
+        undone, redone, nAfterUndo, nAfterRedo,
+        pMouse: ink.pressureOf({ pointerType: 'mouse', pressure: 0 }),
+        pPen0: ink.pressureOf({ pointerType: 'pen', pressure: 0 }),
+        pPen1: ink.pressureOf({ pointerType: 'pen', pressure: 1 }),
+        wLo: ink.widthAt('pen', 4, 0), wHi: ink.widthAt('pen', 4, 1),
+        bgRejected: bgBad.pages[0].bg === null,
+        coalesced: typeof PointerEvent !== 'undefined' && 'getCoalescedEvents' in PointerEvent.prototype,
+      };
+    })()`);
+    ok("引擎：序列化往返不丢点", engine.points === engine.orig && engine.points > 0, JSON.stringify(engine));
+    ok("引擎：纸面样式能往返", engine.paper === "grid", "paper=" + engine.paper);
+    ok("引擎：坏数据一律拒绝（不返回半截文档）", engine.bad1 === true && engine.bad2 === true, JSON.stringify(engine));
+    ok("引擎：从中间擦一刀断成两段", engine.runsAfterErase === 2, "runs=" + engine.runsAfterErase);
+    ok("引擎：撤销 / 重做对得上", engine.undone && engine.redone && engine.nAfterUndo === 0 && engine.nAfterRedo === 1, JSON.stringify(engine));
+    ok("引擎：鼠标压感 0.5、笔压 0/1 如实映射", engine.pMouse === 0.5 && engine.pPen0 === 0 && engine.pPen1 === 1, JSON.stringify(engine));
+    ok("引擎：压感越重线越粗", engine.wLo < engine.wHi, `${engine.wLo} vs ${engine.wHi}`);
+    ok("引擎：底图只收 data:image（拒 javascript:）", engine.bgRejected === true, JSON.stringify(engine));
+
+    // ---- R14b：标注符号 / 高亮带 / 框选平移（引擎层） ----
+    const engine2 = await session.eval(`(async () => {
+      const ink = await import('/src/lib/ink.ts');
+      const doc = ink.emptyDoc('grid');
+      const h = ink.newHistory();
+      ink.commitAddStroke(doc, h, 0, {
+        tool: 'stamp', color: '#ec1313', size: 3, glyph: '★', pts: [{ x: 100, y: 100, p: 0.5 }],
+      });
+      const back = ink.parseDoc(ink.serializeDoc(doc));
+      const st = back.pages[0].strokes[0];
+      const line = { tool: 'pen', color: '#1f2328', size: 3,
+        pts: Array.from({ length: 600 }, (_, i) => ({ x: i, y: 100, p: 0.5 })) };
+      const skip = { tool: 'stamp', color: '#000000', size: 3, glyph: '✓', pts: [{ x: 0, y: 0, p: 0.5 }] };
+      const hl = ink.highlightFor([line, skip], '#f7ad31');
+      const moved = ink.translateStrokes([line], 10, -5);
+      const rc = ink.recolorStrokes([skip], '#4176e6');
+      return {
+        tool: st.tool, glyph: st.glyph, fontPx: ink.stampFontSize(3),
+        hlCount: hl.length, hlBehind: hl[0] ? hl[0].behind === true : false,
+        hlPts: hl[0] ? hl[0].pts.length : -1, hlColor: hl[0] ? hl[0].color : null,
+        movedX: moved[0].pts[0].x, origX: line.pts[0].x,
+        idxLen: ink.strokesInRect([line], 100, 90, 200, 110, 6).length,
+        rcGlyph: rc[0].glyph, rcColor: rc[0].color,
+        union: ink.unionBBox([line]) ? 1 : 0,
+      };
+    })()`);
+    ok("引擎：标注符号能往返（工具/字形/字号）",
+      engine2.tool === "stamp" && engine2.glyph === "★" && engine2.fontPx === 18, JSON.stringify(engine2));
+    ok("引擎：高亮带在底层、抽稀、跳过符号",
+      engine2.hlCount === 1 && engine2.hlBehind === true && engine2.hlPts <= 61 && engine2.hlPts > 1 && engine2.hlColor === "#f7ad31",
+      JSON.stringify(engine2));
+    ok("引擎：平移返回新对象（不动原笔迹）", engine2.movedX === engine2.origX + 10, JSON.stringify(engine2));
+    ok("引擎：框选命中 + 外接框 + 换色保留符号",
+      engine2.idxLen === 1 && engine2.union === 1 && engine2.rcGlyph === "✓" && engine2.rcColor === "#4176e6",
+      JSON.stringify(engine2));
+
+    // ---- R14b：符号面板 + 框选高亮（界面层） ----
+    // ⚠ 这一段发生在"进手写页"的断言之前，所以必须**自己先导航过去**（不依赖上一段的落点）
+    await goto(session, "/#/handwrite");
+    const stamped = await session.eval(`(async () => {
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const cv = document.querySelector('.hw-canvas');
+      const r = cv.getBoundingClientRect();
+      const tool = re => [...document.querySelectorAll('.hw-tool')].find(b => new RegExp(re).test(b.textContent || ''));
+      tool('标注符号').click();
+      await wait(200);
+      const glyphs = document.querySelectorAll('.hw-glyph').length;
+      document.querySelectorAll('.hw-glyph')[0].click();
+      await wait(150);
+      cv.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 11, pointerType: 'pen', isPrimary: true,
+        bubbles: true, cancelable: true, clientX: r.left + 300, clientY: r.top + 300, pressure: 0.5, buttons: 1 }));
+      cv.dispatchEvent(new PointerEvent('pointerup', { pointerId: 11, pointerType: 'pen', isPrimary: true,
+        bubbles: true, cancelable: true, clientX: r.left + 300, clientY: r.top + 300, pressure: 0, buttons: 0 }));
+      await wait(350);
+      const ctx = cv.getContext('2d');
+      const data = ctx.getImageData(0, 0, cv.width, cv.height).data;
+      let red = 0;
+      for (let i = 0; i < data.length; i += 4 * 7) {
+        if (data[i] > 150 && data[i + 1] < 100 && data[i + 2] < 100) red += 1;
+      }
+      return { glyphs, red, foot: (document.querySelector('.hw-foot') || {}).innerText || '' };
+    })()`);
+    ok("「标注符号」点开符号面板（≥20 个）", stamped.glyphs >= 20, "glyphs=" + stamped.glyphs);
+    ok("点一下就盖上一个符号（笔数 +1）", /本页\s*1\s*笔/.test(stamped.foot || ""), JSON.stringify(stamped.foot));
+
+    const selFlow = await session.eval(`(async () => {
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const cv = document.querySelector('.hw-canvas');
+      const r = cv.getBoundingClientRect();
+      const tool = re => [...document.querySelectorAll('.hw-tool')].find(b => new RegExp(re).test(b.textContent || ''));
+      const count = () => {
+        const m = /本页\\s*(\\d+)\\s*笔/.exec((document.querySelector('.hw-foot') || {}).innerText || '');
+        return m ? Number(m[1]) : -1;
+      };
+      const send = (pid, t, x, y, p) => cv.dispatchEvent(new PointerEvent(t, {
+        pointerId: pid, pointerType: 'pen', isPrimary: true, bubbles: true, cancelable: true,
+        clientX: r.left + x, clientY: r.top + y, pressure: p, buttons: t === 'pointerup' ? 0 : 1,
+      }));
+      // 先用钢笔画一笔（高亮只对笔迹生效，符号会被跳过）
+      tool('钢笔').click(); await wait(150);
+      send(21, 'pointerdown', 200, 200, 0.4);
+      for (let i = 1; i <= 20; i += 1) send(21, 'pointermove', 200 + i * 8, 200 + i * 3, 0.5);
+      send(21, 'pointerup', 360, 260, 0);
+      await wait(320);
+      const beforeN = count();
+      // 框选刚画的那一笔
+      tool('框选').click(); await wait(150);
+      send(22, 'pointerdown', 120, 120, 0.5);
+      for (let i = 1; i <= 10; i += 1) send(22, 'pointermove', 120 + i * 30, 120 + i * 20, 0.5);
+      send(22, 'pointerup', 420, 320, 0);
+      await wait(320);
+      const selbar = document.querySelector('.hw-selbar');
+      const selText = selbar ? selbar.innerText : '';
+      const hlBtn = selbar ? [...selbar.querySelectorAll('button')].find(b => /高亮/.test(b.textContent || '')) : null;
+      if (hlBtn) { hlBtn.click(); await wait(420); }
+      const afterN = count();
+      const msg = document.querySelector('.settings-msg');
+      return { beforeN, afterN, selText, hasBar: !!selbar, clicked: !!hlBtn, notice: msg ? msg.innerText : '' };
+    })()`);
+    ok("框选后出现选区动作条（并报出选中几笔）",
+      selFlow.hasBar === true && /已选中\s*[12]\s*笔/.test(selFlow.selText || ""),
+      JSON.stringify(selFlow.selText));
+    ok("「高亮」新增一条底层色带（笔数 +1）", selFlow.afterN === selFlow.beforeN + 1, JSON.stringify(selFlow));
+    ok("高亮后如实说明它铺在字下面", /高亮/.test(selFlow.notice || ""), JSON.stringify(selFlow.notice));
+
+    // ---- 识别为文字：未配 Key 时必须如实说做不到（不许假装识别了） ----
+    const ocrClick = await session.eval(`(async () => {
+      const b = [...document.querySelectorAll('.hw-stage-bar button')].find(x => /识别为文字/.test(x.textContent || ''));
+      if (!b) return { ok: false, why: '没有识别按钮' };
+      b.click();
+      await new Promise(r => setTimeout(r, 500));
+      const m = document.querySelector('.hw-ocr-msg');
+      return { ok: true, text: m ? m.innerText : '' };
+    })()`);
+    ok(
+      "未配 Key 时「识别为文字」如实提示（不假装有离线识别）",
+      !!(ocrClick.ok && /API Key|数据设置/.test(ocrClick.text)),
+      JSON.stringify(ocrClick),
+    );
+
+    // —— 界面：侧栏入口 → 手写页 ——
+    await goto(session, "/#/courses");
+    const navInk = await session.eval(
+      `(() => [...document.querySelectorAll('.nav-item .nav-label')].map(n => (n.textContent || '').trim()))()`,
+    );
+    ok("侧栏有「手写笔记」入口", Array.isArray(navInk) && navInk.includes("手写笔记"), JSON.stringify(navInk));
+
+    await goto(session, "/#/handwrite");
+    const shell = await session.eval(`(() => ({
+      canvas: document.querySelectorAll('.hw-canvas').length,
+      tools: document.querySelectorAll('.hw-tool').length,
+      colors: document.querySelectorAll('.hw-color').length,
+      papers: document.querySelectorAll('.hw-stage-bar .chip').length,
+      noSidebar: !document.querySelector('.sidebar'),
+      noTopbar: !document.querySelector('.topbar'),
+      foot: (document.querySelector('.hw-foot') || {}).innerText || '',
+    }))()`);
+    ok("手写页渲染出画布", shell.canvas === 1, JSON.stringify(shell));
+    ok("七种工具都在（笔/铅笔/直线/荧光/符号/橡皮/框选）", shell.tools === 7, "tools=" + shell.tools);
+    ok("有调色板与四种纸面", shell.colors >= 4 && shell.papers === 4, JSON.stringify(shell));
+    ok("手写页是沉浸式外壳（无侧栏与顶栏）", shell.noSidebar && shell.noTopbar, JSON.stringify(shell));
+
+    // —— 合成笔事件：真的在画布上落墨 ——
+    const drawn = await session.eval(`(async () => {
+      const cv = document.querySelector('.hw-canvas');
+      if (!cv) return { ok: false, why: '没有画布' };
+      const r = cv.getBoundingClientRect();
+      const ev = (type, x, y, p) => cv.dispatchEvent(new PointerEvent(type, {
+        pointerId: 7, pointerType: 'pen', isPrimary: true, bubbles: true, cancelable: true,
+        clientX: r.left + x, clientY: r.top + y, pressure: p, buttons: 1, button: 0,
+        width: 4, height: 4, tiltX: 12, tiltY: -6,
+      }));
+      ev('pointerdown', 160, 160, 0.25);
+      for (let i = 1; i <= 24; i += 1) ev('pointermove', 160 + i * 9, 160 + Math.sin(i / 3) * 26, 0.3 + i / 40);
+      ev('pointerup', 160 + 24 * 9, 160, 0);
+      await new Promise(res => setTimeout(res, 350));
+      const ctx = cv.getContext('2d');
+      const data = ctx.getImageData(0, 0, cv.width, cv.height).data;
+      let dark = 0;
+      for (let i = 0; i < data.length; i += 4 * 11) {
+        if (data[i + 3] > 0 && (data[i] < 200 || data[i + 1] < 200 || data[i + 2] < 200)) dark += 1;
+      }
+      const undoBtn = document.querySelector('.hw-tool-icon[aria-label="撤销"]');
+      return {
+        ok: true, dark,
+        foot: (document.querySelector('.hw-foot') || {}).innerText || '',
+        canUndo: !!undoBtn && !undoBtn.disabled,
+      };
+    })()`);
+    ok("合成长按写一笔后画布真的出现墨迹（像素级）", !!(drawn.ok && drawn.dark > 20), JSON.stringify(drawn));
+    ok("页脚如实报「本页 1 笔」", /本页\s*1\s*笔/.test(drawn.foot || ""), JSON.stringify(drawn.foot));
+    ok("写过之后「撤销」可用", drawn.canUndo === true, JSON.stringify(drawn));
+
+    // —— 撤销：笔数回到 0 ——
+    const undoneUi = await session.eval(`(async () => {
+      const b = document.querySelector('.hw-tool-icon[aria-label="撤销"]');
+      if (!b) return { ok: false, why: '没有撤销按钮' };
+      b.click();
+      await new Promise(r => setTimeout(r, 260));
+      return { ok: true, foot: (document.querySelector('.hw-foot') || {}).innerText || '' };
+    })()`);
+    ok("撤销后本页回到 0 笔", /本页\s*0\s*笔/.test(undoneUi.foot || ""), JSON.stringify(undoneUi.foot));
+
+    // —— 加页 / 翻页 ——
+    const paged = await session.eval(`(async () => {
+      const b = [...document.querySelectorAll('.hw-stage-bar button')].find(x => /加页/.test(x.textContent || ''));
+      if (!b) return { ok: false, why: '没有加页按钮' };
+      b.click();
+      await new Promise(r => setTimeout(r, 220));
+      return { ok: true, pages: (document.querySelector('.hw-pages') || {}).innerText || '' };
+    })()`);
+    ok("加页后页码显示 2 页", /第\s*2\s*\/\s*2\s*页/.test(paged.pages || ""), JSON.stringify(paged));
+
+    // —— 保存：浏览器预览下**如实**报"仅桌面版可用" ——
+    const inkSave = await session.eval(`(async () => {
+      const title = document.querySelector('.hw-title');
+      if (title) {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(title, '手写冒烟');
+        title.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      const btn = [...document.querySelectorAll('.hw-bar-right button')].find(b => b.textContent.trim() === '保存');
+      if (!btn) return { ok: false, why: '没有保存按钮' };
+      btn.click();
+      await new Promise(r => setTimeout(r, 600));
+      const msg = document.querySelector('.settings-msg');
+      return { ok: true, text: (msg ? msg.textContent : '') || '' };
+    })()`);
+    ok(
+      "手写笔记空页保存被如实拦下（不许落空笔记）",
+      !!(inkSave.ok && /还没有写任何笔迹|桌面版/.test(inkSave.text)),
+      JSON.stringify(inkSave),
+    );
+
+    // —— 笔自检面板：能打开且显示压感能力 ——
+    const diagOn = await session.eval(`(async () => {
+      const b = [...document.querySelectorAll('.hw-tools button')].find(x => /笔自检/.test(x.textContent || ''));
+      if (!b) return { ok: false, why: '没有笔自检按钮' };
+      b.click();
+      await new Promise(r => setTimeout(r, 200));
+      const d = document.querySelector('.hw-diag');
+      return { ok: true, shown: !!d, text: d ? d.innerText : '' };
+    })()`);
+    ok(
+      "「笔自检」能展开并说实话（合并事件能力）",
+      !!(diagOn.ok && diagOn.shown && /合并事件/.test(diagOn.text)),
+      JSON.stringify(diagOn),
+    );
+
     // ---------------- 资源与 console 总检查 ----------------
     console.log("\n[汇总检查] 资源与 console 报错");
     const uniqBad = [...new Set(badResponses)];

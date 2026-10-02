@@ -2734,6 +2734,15 @@ select { -webkit-user-select: none; user-select: none; }
   color: var(--brand-text);
 }
 
+/* R14：手写笔记的来源徽标。**颜色刻意与"自己写的"接近但不相同**（都是用户自己产出的，
+   不该像 AI 那样挂警示色；但也要一眼能区分，因为它的正文里是 PNG + 笔迹数据而不是 Markdown 文本）。 */
+.src-badge.src-ink {
+  background: var(--surface-sunken);
+  border-color: var(--border-strong);
+  color: var(--text);
+  letter-spacing: var(--track-wide, 0.02em);
+}
+
 .src-badge.src-ok {
   background: #ebf7ef;
   border-color: #bfe3cb;
@@ -3793,4 +3802,123 @@ select {
 
 .sidebar-mascot {
   bottom: 50px;
+}
+
+/* ==========================================================================
+   R14 · 平板 / 移动端适配（**整体框架不变**，只改外壳与触控目标）
+
+   三条判断（写在最前面，免得后来者重复权衡）：
+   1. **不另做一套移动端页面**：路由、组件、数据层全部复用，只把"侧面导航"在窄屏下
+      变成抽屉、把触控目标放大。另开一套移动端页面会让此后每一个需求都要写两遍。
+   2. **断点 1024px**：竖屏平板（如 834 / 820 / 768 逻辑像素）落进抽屉模式；
+      横屏平板（1024+）与桌面保持侧栏常驻 —— 横屏时侧栏并不挤，常驻的信息架构更好。
+   3. **触控目标 ≥ 44px**：`styles.css` 里那些 28px 的按钮在触屏上普遍点不中。
+      桌面端维持原样（鼠标精度高，放大反而显得松散），只在窄屏媒体查询里放大。
+   ========================================================================== */
+
+/* 汉堡按钮：只在小屏出现（宽屏由下面的 media query 隐藏） */
+.topbar-nav-btn {
+  display: none;
+}
+
+/* 抽屉遮罩：默认不存在感（不占位、不接收事件） */
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(15, 17, 21, 0.38);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+
+@media (max-width: 1024px) {
+  /* ---- 侧栏 → 左侧抽屉 ---- */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(300px, 82vw);
+    z-index: 70;
+    transform: translateX(-100%);
+    transition: transform var(--dur) var(--ease);
+    /* 抽屉里不摆女仆形象：小屏上那 180px 的留白太亏（宽屏才保留这处装饰） */
+    padding-bottom: 16px;
+    will-change: transform;
+  }
+
+  .sidebar-mascot {
+    display: none;
+  }
+
+  body.nav-open .sidebar {
+    transform: translateX(0);
+    box-shadow: var(--sh-3);
+  }
+
+  body.nav-open .nav-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* ---- 触控目标放大（只影响窄屏） ---- */
+  .nav-item {
+    min-height: 46px;
+  }
+
+  .chip,
+  .ghost-btn,
+  .primary,
+  .danger-btn,
+  .btn {
+    min-height: 40px;
+  }
+
+  .icon-btn,
+  .topbar-nav-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .topbar-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ---- 内容区：窄屏不留大边距，版心也不再限宽 ---- */
+  .content {
+    padding: var(--sp-4) var(--sp-4) var(--sp-5);
+  }
+
+  .content > * {
+    max-width: 100%;
+  }
+
+  .topbar {
+    gap: 8px;
+  }
+
+  /* 顶栏那两个带文字的按钮在小屏上收成图标（文字由 title / aria-label 承担） */
+  .topbar-actions .ghost-btn .nav-label,
+  .topbar-actions .ghost-btn span {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .content {
+    padding: var(--sp-3) var(--sp-3) var(--sp-4);
+  }
+
+  .page-title {
+    font-size: var(--fs-lg, 17px);
+  }
+
+  /* 多列卡片栅格在手机上强制单列（各页自己的 media query 大多只到 720px） */
+  .courses-grid,
+  .cards-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }

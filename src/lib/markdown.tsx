@@ -104,6 +104,27 @@ type Block =
 const ATX_RE = /^ {0,3}(#{1,6})(?:\s+(.*?))?\s*$/;
 const HR_RE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})\s*([A-Za-z0-9_+#.-]*)\s*$/;
+
+/**
+ * R14 · **应用内部数据围栏**的前缀：```` ```chunxiao-<name> ```` 这种围栏是"程序自己存的数据"，
+ * 不是给人读的内容 —— 渲染为空、纯文本贡献 0 个字符。
+ *
+ * 为什么需要它：手写笔记把笔迹 JSON 也存在 `content_md` 里（见 `lib/inknote.ts`）。
+ * 一页笔迹的 JSON 有几百 KB，直接当代码块渲染出来，阅读视图会被一整屏 base64/JSON 淹掉。
+ *
+ * 为什么"贡献 0 个字符"是硬要求：块内纯文本偏移是批注锚点的尺子（本文件头部 §批注层），
+ * 渲染侧不产生任何文本、纯文本侧就必须同样是 0 —— 两边任何一处不一致，批注高亮就会整体错位。
+ *
+ * ⚠ 与 `image/svg+xml` 的禁令同源：这里的"不渲染"是**白名单式**的极窄规则
+ * （只认 `chunxiao-` 前缀），不是放开 HTML；其它任何语言的代码块行为完全不变。
+ */
+export const DATA_FENCE_PREFIX = "chunxiao-";
+
+/** 这个块是不是"应用内部数据块"（渲染层与纯文本层必须用同一个判定） */
+function isDataFence(lang: string): boolean {
+  return typeof lang === "string" && lang.startsWith(DATA_FENCE_PREFIX);
+}
+
 const UL_RE = /^(\s*)([-*+])\s+(.*)$/;
 const OL_RE = /^(\s*)(\d{1,9})[.)]\s+(.*)$/;
 const QUOTE_RE = /^ {0,3}>\s?(.*)$/;
@@ -480,7 +501,8 @@ function blockPlainText(b: Block): string {
     case "quote":
       return b.lines.map(plainInline).join("");
     case "code":
-      return b.code;
+      // R14：应用内部数据围栏（```chunxiao-*）**不渲染**，也**不贡献纯文本** —— 理由见文件头 §数据围栏
+      return isDataFence(b.lang) ? "" : b.code;
     case "list":
       return listPlainText(b.items);
     case "table":
@@ -870,7 +892,9 @@ function renderBlock(
   marks: MdMark[],
   terms: string[],
   onMarkClick?: (id: number) => void,
-): ReactElement {
+  // R14：返回值放宽到 `null` —— 应用内部数据围栏（```chunxiao-*）**渲染为空**
+  // （理由见文件头 §数据围栏）。React 对 `null` 子节点是合法且不产生 DOM 的。
+): ReactElement | null {
   const ctx: RenderCtx = { off: 0, marks, terms, onMarkClick, key: 0 };
   const mathFlag = blockHasInlineMathAt(b) ? "true" : undefined;
 
@@ -886,6 +910,8 @@ function renderBlock(
     case "hr":
       return <hr className="md-hr" data-block={index} data-block-math={mathFlag} />;
     case "code":
+      // R14：数据围栏渲染为空 → 这里也必须是空串（**两把尺子必须一致**，否则批注会整体错位）
+      if (isDataFence(b.lang)) return null;
       return (
         <pre className="md-pre" data-block={index} data-lang={b.lang || undefined} data-block-math={mathFlag}>
           <code>{emitText(b.code, ctx)}</code>

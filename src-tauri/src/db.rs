@@ -2194,8 +2194,12 @@ pub fn chat_session_summary_set(
 
 /// 笔记来源的**合法取值**（契约 §2.1）：
 ///   · `ai_session` —— 由 AI 依据某次对话整理（界面上必须标「AI 整理 · 待核对」）；
-///   · `user`       —— 用户自己写的。
-const NOTE_SOURCES: [&str; 2] = ["user", "ai_session"];
+///   · `user`       —— 用户自己写的；
+///   · `ink`        —— R14 触控笔手写的（正文里内联着每页 PNG + 笔迹数据围栏）。
+///
+/// ⚠ 前端 `src/lib/notes.ts` 的 `INK_NOTE_SOURCE` / `NoteSource` 必须与此处**同时改**：
+///   漏改会表现为"保存手写笔记时报『来源只能是』"，而且这是白名单故意为之的**如实失败**。
+const NOTE_SOURCES: [&str; 3] = ["user", "ai_session", "ink"];
 
 /// 校验并规范化笔记来源；非法值给可读中文错误（**不静默落库**，
 /// 否则"AI 整理"与"自己写的"会在界面上互相冒充，这是本产品的诚实红线）。
@@ -2205,7 +2209,7 @@ fn norm_note_source(source: &str) -> Result<String, String> {
         return Ok(s.to_string());
     }
     Err(format!(
-        "笔记来源只能是 ai_session（AI 整理）或 user（自己写的），收到的是「{}」。",
+        "笔记来源只能是 ai_session（AI 整理）、user（自己写的）或 ink（手写），收到的是「{}」。",
         if s.is_empty() { "(空)" } else { s }
     ))
 }
