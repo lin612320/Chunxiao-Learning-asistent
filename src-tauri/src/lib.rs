@@ -1310,6 +1310,19 @@ fn check_todo_notifications(app: &AppHandle) {
 // 入口
 // ---------------------------------------------------------------------------
 
+/// 应用入口（桌面 `main.rs` 直接调用它；Android / iOS 由 Tauri 的移动端包装调用）。
+///
+/// ⚠ **`#[cfg_attr(mobile, tauri::mobile_entry_point)]` 不是可有可无的装饰**（R14 实测）：
+///   它负责生成 Android/iOS 侧要调用的 **JNI 入口符号**
+///   （`Java_<包名>_generated_Rust_create` / `onActivityCreate` / `onActivityDestroy` …，
+///   对应 `wry` 的 `Rust.kt` 里那一串 `external fun`）。
+///   缺了它的后果**不是编译报错**，而是：
+///     · debug 构建：`.so` 里**一个 JNI 符号都没有** → `System.loadLibrary` 成功，
+///       但 Activity 一调 `Rust.create()` 就 `UnsatisfiedLinkError` → **应用启动即闪退**；
+///     · release 构建：更隐蔽 —— 没有对外导出的入口符号，**LTO 会把整个应用当成死代码删光**，
+///       产出一个只有 C 运行时符号的 **0.3 MB 空壳 .so**（正常应为数 MB）。
+///   `mobile` 这个 cfg 由 `tauri-build` 在 Android/iOS 目标下自动设置，桌面构建不受影响。
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
