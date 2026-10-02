@@ -6,6 +6,85 @@
 > **悬浮球（Electron 春晓助手）是独立应用，有自己的版本号**（`floating-ball/package.json`），重打时递增，以免旧常驻进程顶掉新包；
 > **安装包内资源目录**（`bundle.resources` 的目标名 `win-unpacked-<主版本>`）**每次发版必须递增**，否则覆盖安装会报 `Error opening file for writing`。
 
+## [0.10.0] - 2026-10-02
+
+> **R14 · 平板适配 + 触控笔手写笔记（含标注工具集：框选高亮 / 标注符号 / 识别为文字）**：
+> 契约与可行性评估见 [`docs/25`](docs/25-平板端与触控笔手写契约.md)。
+> **零数据库改动、零新命令**：手写笔记就是 `notes` 表里的一条普通笔记（新增来源值 `ink`）。
+> 共 4 个新文件（`lib/ink.ts` / `lib/inknote.ts` / `views/Handwrite.tsx` / `Handwrite.css`）。
+>
+> 📦 **出安装包**：`发布包/春晓_0.10.0_x64-setup.exe`（见下方「出包记录」）。
+> `win-unpacked-0.9.1` → **`win-unpacked-0.10.0`**（目录名随版本递增，否则覆盖安装报
+> `Error opening file for writing`）。**悬浮球未重打**（R14 未改 `floating-ball/src` 一个字），
+> 资源目录里仍是 **1.0.9**。
+>
+> 质量闸门 **9/9，九步全部真跑**（**第 8 步也真跑了，没有 SKIP**）：
+> tsc exit 0 · vite build exit 0 · `cargo check` error=0 warning=0 · 图标资产回读 · 品牌残留扫描 ·
+> `.ps1` BOM 检查 · 浏览器层 UI 冒烟 **162/162** · **桌面真机 23/23**（真 WebView2 + 真 Tauri IPC +
+> 真 SQLite，用完自动还原真实数据库）· 悬浮球面板版面守门 **50/50**。
+> Rust 单测 **70/70**（`cargo test --lib`）。
+> ⚠ 未验证：真机触控笔的压感曲线与延迟、**Android APK 的真机安装与运行**（包已产出，见下「移动端」）、
+> iPadOS（需 macOS + Xcode）、手写识别的实际中文识别质量。
+
+### 出包记录
+
+| 项 | 值 |
+| --- | --- |
+| 安装包 | `发布包/春晓_0.10.0_x64-setup.exe` |
+| 体积 / SHA256 | **87,460,237 B（83.41 MB）** / `C0A59B3D3EF1966BD9C8CEE218E0234DBE1CC789708BC64EEDCFD38B47E00487` |
+| release exe | `src-tauri/target/release/chunxiao-study.exe`（**6,450,688 B**，ProductVersion **0.10.0**） |
+| 包内悬浮球 | **1.0.9**（本轮未重打；与 `春晓助手_1.0.9_便携版.exe` 同源，实测资源目录里 ProductVersion=1.0.9） |
+| 资源目录 | `win-unpacked-0.10.0`（实测 **109 个文件 / 269.6 MB**，内含球主程序 `春晓助手.exe`） |
+| 构建 | `npm run tauri build` exit 0（release 编译 **2m49s**，makensis 出包成功） |
+
+### 移动端（Android APK）
+
+| 项 | 值 |
+| --- | --- |
+| 产物 | `发布包/春晓_0.10.0_release_universal.apk` |
+| 体积 / SHA256 | **17,242,144 B（16.44 MB）** / `14FBAF4A4D04AD4332F5B3927AA24ED8070567B69A6C918B2CE1FDB276809BFE` |
+| 形态 | **release · 已签名**（`apksigner verify` = Verifies，v2 方案）· **双 ABI arm64-v8a + armeabi-v7a**（7.15 MB + 5.48 MB，各含 24 个 JNI 入口） |
+| 包信息（aapt2 实测） | `com.chunxiao.study` · `versionName=0.10.0` · `versionCode=10000` · 应用名 **春晓** · minSdk 24 / targetSdk 36 · `native-code: arm64-v8a armeabi-v7a` |
+| 前端 | `assets/` **72 条**（`index.html` + `assets/*` + `tauri.conf.json`），即 0.10.0 的 `dist/` |
+| 签名 | keystore `D:\cx-keystore\chunxiao-release.jks`（别名 `chunxiao`），密码在 `gen/android/app/keystore.properties`，**都不进仓库**；⚠ 丢了就无法再给已安装用户升级 |
+| **修复的两个真 bug** | ① `lib.rs` 的 `run()` 缺 **`#[cfg_attr(mobile, tauri::mobile_entry_point)]`** → `.so` 里 **0 个 JNI 符号** → 启动即 `UnsatisfiedLinkError` 闪退（release 下还因 LTO 把应用删光，只剩 0.3 MB 空壳 `.so`）；② APK 里**一个 `assets/` 都没有**（Tauri CLI 在符号链接那步就退出，**没走到复制前端**；而 `PluginManager` 启动时要读 `assets/tauri.conf.json`） |
+| 完整记录 | [`docs/26`](docs/26-Android移动端构建记录.md)（§七 = 闪退定位与修复；§二/§三 = 环境层三堵墙：**中文工程路径让 NDK 的 lld 打不开目标文件**（报错伪装成 `only metadata stub found for rlib dependency core`）、C 盘满 `os error 112`、**符号链接需开发者模式** + AGP 拒非 ASCII 路径） |
+| 未验证 | 修复后的 release 包**尚未再上真机**、触控笔压感在 Android WebView 的实际表现、x86/x86_64、iOS（需 macOS） |
+| 已作废 | 第一版 `春晓_0.10.0_arm64-debug.apk`（125.38 MB）**装到手机上启动即闪退**，已从 `发布包/` 删除，勿再使用 |
+
+### 新增
+
+- **触控笔手写笔记页**（`views/Handwrite.tsx`，路由 `/handwrite` 新建 / `/handwrite/:id` 续写）：
+  Canvas 墨迹、压感变宽、`getCoalescedEvents` 高采样、倾斜与接触面积读数。
+  **工具集**：钢笔 / 铅笔 / 直线 / 荧光笔 / **标注符号（22 个：✓ ✗ ★ ☆ ※ ！ ？ ① ② ③ → ← ↑ ↓ ⇒ ⚠ + − = △ □ ○）**
+  / 橡皮 / **框选**；纸面（空白·方格·横线·点阵）/ 多页 / 双指缩放平移 / 底图 / 撤销重做（100 步）/
+  导出 PNG / 打印为 PDF / **识别为文字**（走 BYOK 视觉模型，结果落进笔记的「文字稿 · 模型转写非原文」小节）。
+- **框选 → 高亮 / 变色 / 移动 / 删除**：高亮是"在选中笔迹**下面**铺一条荧光色带"（`behind` 层），
+  而非把原笔迹改成荧光色 —— 后者会丢掉原本的墨色，也看不出"这是底色"。
+- **`lib/ink.ts`：零依赖墨迹引擎**——Catmull-Rom 加密（增量与批量**同一公式**，抬手不跳）、
+  折线按线宽分段 + `WeakMap` 缓存（一页几百笔也能秒重绘）、橡皮**删点断笔**、操作栈撤销、
+  紧凑序列化（平铺三元组，约 14 字节/点）、`parseDoc` 对任何脏数据一律返回 `null`。
+- **`lib/inknote.ts`：手写笔记 ↔ 既有笔记链路**——正文 = 逐页 PNG dataURL + ` ```chunxiao-ink ` 笔迹围栏。
+  备份 / 还原 / 列表 / 导出 / 悬浮球桥接**全部白拿**，不需要新表、新命令或迁移。
+- **平板外壳适配**（`styles.css` + `Layout/Topbar/Sidebar`）：≤1024px 侧栏变**抽屉**（汉堡按钮 + 遮罩 +
+  换路由自动收起）、触控目标放大到 ≥40px。**桌面端界面逐像素不变**（规则全在媒体查询内）。
+- 侧栏新增「手写笔记」入口；笔记页新增「手写一条」；手写笔记在列表里点进去是**手写页**而不是 Markdown 文本框。
+
+### 变更
+
+- `lib/markdown.tsx`：新增**应用内部数据围栏**规则——` ```chunxiao- ` 前缀的围栏**渲染为空**且
+  **纯文本贡献 0 个字符**。后半句是硬要求：块内纯文本偏移是批注锚点的尺子，两侧任何一处不一致都会让批注高亮整体错位。
+- `lib/notes.ts` / `db.rs`：笔记来源白名单加 `ink`（**必须同时改**：漏改会表现为"保存报『来源只能是…』"，
+  这是白名单故意为之的如实失败）；手写笔记的来源徽标是「手写」，列表里**不显示"N 字"**
+  （`content_len` 是图片与笔迹数据的字符数，当"字数"显示是误导）。
+
+### 已知缺口
+
+- **`.docx` 导出里看不到手写页**：`src-tauri/src/docx.rs` 目前不处理图片，而手写页是内联 PNG。
+  `.md` 导出完整（PNG 就在 Markdown 里）。已登记为后续第一优先级。
+- 手写识别**必须联网、花用户自己的 token**，且结果是**模型转写非原文**（界面已标注）；
+  压感**不做校准**，同一条笔迹在不同笔上粗细感受不同。
+
 ## [0.9.1] - 2026-09-27
 
 > **R13 · 侧栏「相关材料」+ 点材料直接打开原文件**：

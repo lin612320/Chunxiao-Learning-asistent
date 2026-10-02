@@ -1,6 +1,6 @@
 [package]
 name = "chunxiao-study"
-version = "0.9.1"
+version = "0.10.0"
 description = "春晓（工程名 chunxiao-study）—— 面向大学生的本地优先学习助手"
 authors = ["you"]
 edition = "2021"
